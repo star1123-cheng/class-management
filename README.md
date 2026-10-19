@@ -104,6 +104,17 @@ GAS_URL: 'https://script.google.com/macros/s/……/exec',
 - **重設籤池**：設定頁輸入「重設」後按按鈕；抽籤紀錄與券異動都會保留。
 - **修改籤池或卡片**：直接改試算表的「籤池」「卡片」工作表（例如換實物名稱、調權重、把「啟用」改成「否」）。
 
+### 安裝成手機 App「班級管理」
+
+記錄頁與設定頁可以安裝到手機桌面，打開時全螢幕、沒有網址列，用起來像一般 App。不需要上架商店，也不用付費。**必須先完成 GitHub Pages 部署**（App 需要 https 網址）。
+
+- **iPhone**：用 **Safari** 打開記錄頁網址 → 下方「分享」按鈕 → 「加入主畫面」→ 名稱保留「班級管理」→「加入」。
+- **Android**：用 **Chrome** 打開記錄頁網址 → 右上「⋮」→「安裝應用程式」（或「加到主畫面」）。
+- 安裝後第一次打開，iPhone 需要再輸入一次導師碼（iPhone 的 App 和 Safari 分開記存取碼；Android 通常不用）。
+- 一定要有網路才能讀寫資料；沒網路時畫面打得開，但會顯示「網路連線失敗」。
+- 更新程式後不用重新安裝：有網路時 App 一律抓最新版。
+- 投影頁、抽籤頁不需要安裝，在班級電腦用瀏覽器開即可。
+
 ---
 
 ## 四、背景音樂
@@ -173,6 +184,15 @@ GAS_URL: 'https://script.google.com/macros/s/……/exec',
 | 35 | 在班級電腦的記錄頁輸入導師碼（不勾選「記住在這台裝置」）→ 關閉分頁 → 重新打開記錄頁 | 關閉前可以正常記錄；重新打開又要求導師碼；投影頁、抽籤頁仍可用（教室碼還在） |
 | 36 | 指令碼屬性把 `DISPLAY_CODE` 改成和 `ACCESS_CODE` 一樣，執行 `setup()` | 出現「教室碼不可以和導師碼相同」錯誤（驗收後改回不同的值） |
 
+### 手機 App（需先部署到 GitHub Pages）
+| # | 操作 | 預期結果 |
+| --- | --- | --- |
+| 37 | 依「安裝成手機 App」把記錄頁加入主畫面 | 桌面出現霓虹圓形 logo，名稱「班級管理」 |
+| 38 | 從桌面圖示打開 | 全螢幕開啟記錄頁，沒有網址列；標題旁有 logo |
+| 39 | 修改任一頁面文字並推送到 GitHub，等 1 至 2 分鐘後重新打開 App | 看到新版內容 |
+| 40 | 開飛航模式再打開 App | 畫面能打開，操作時顯示「網路連線失敗」，不會顯示舊資料 |
+| 41 | 看四個頁面的瀏覽器分頁 | 都顯示 logo 小圖示 |
+
 ---
 
 ## 六、實作決定
@@ -200,6 +220,7 @@ GAS_URL: 'https://script.google.com/macros/s/……/exec',
 19. **YouTube 失敗判定**：腳本載入失敗、15 秒內播放器未就緒、播放器回報錯誤，或點「開啟聲音」後 10 秒仍未開始播放，都視為失敗並改用內建音效。
 20. **兩組存取碼（規格原為一組，依導師要求增加）**：新增指令碼屬性 `DISPLAY_CODE`（教室碼），只能呼叫 `ping`、`getBoard`、`getLottery`、`draw`；其他 API 用教室碼呼叫時回新增的錯誤代碼 `FORBIDDEN`，不讀也不改任何資料。`ping` 會回傳目前身分 `role`（`teacher` 或 `display`）。`setup()` 會拒絕兩組相同的存取碼。
 21. **暫時登入**：存取碼可選「記住在這台裝置」（瀏覽器 localStorage）或不記住（只存在這個分頁的 sessionStorage，關閉分頁就消失）。暫時登入優先使用，所以班級電腦上導師暫時登入時，教室碼仍保留，登出後投影頁與抽籤頁照常可用。記錄頁、設定頁遇到教室碼時，跳出的導師碼視窗預設**不勾選**記住。
+22. **手機 App（PWA）**：只把記錄頁、設定頁做成可安裝的 App（`manifest.webmanifest` 名稱「班級管理」，開啟頁為記錄頁）。`sw.js` 採「網路優先」：有網路時永遠下載最新版，沒網路才用手機上的備份畫面；GAS API（POST、`script.google.com`）與 YouTube 一律不經過快取，所以不會看到舊資料。圖示由導師提供的 logo 裁切成 32、96、180、192、512 px，另有 Android 可裁切版本（logo 縮到中間 80%）。
 
 ---
 
@@ -230,6 +251,7 @@ config.js           GAS 網址、MUSIC_SOURCE、YOUTUBE_VIDEO_ID（公開資訊�
 css/style.css       暖色主題與共用元件
 css/lottery.css     夜空主題
 js/api.js           請求封裝、存取碼處理、錯誤處理
+js/pwa.js           註冊 Service Worker（手機 App）
 js/record.js        記錄頁
 js/settings.js      設定頁
 js/board.js         投影頁
@@ -238,6 +260,9 @@ js/lottery-fx.js    跑馬燈、撕紙、翻卡、彩帶
 js/audio.js         Web Audio 合成音效
 js/music.js         背景音樂（YouTube／mp3／none）
 assets/             放 lottery-bgm.mp3 用（預設為空）
+icons/              App 與網頁圖示（logo）
+manifest.webmanifest 手機 App 設定（名稱「班級管理」）
+sw.js               Service Worker（網路優先）
 gas/Code.gs         後端，含 setup()
 gas/appsscript.json GAS 權限設定
 template-roster.csv 名單範本（只有班級代號、座號兩欄）

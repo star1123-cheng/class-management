@@ -5,13 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex">
   <meta name="theme-color" content="#FFF8EE">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="班級管理">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="application-name" content="班級管理">
   <title>作業缺交記錄</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div class="page">
     <header class="topbar">
-      <h1>作業缺交記錄</h1>
+      <h1 class="brand"><img src="icons/logo-96.png" alt="" width="32" height="32">作業缺交記錄</h1>
       <div class="right">
         <span id="missingCount" class="missing-count">缺交 0 人</span>
         <a class="icon-link" href="settings.html" aria-label="設定頁">⚙ 設定</a>
@@ -64,6 +72,7 @@
 
   <script src="config.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/pwa.js"></script>
   <script src="js/record.js"></script>
 </body>
 </html>
