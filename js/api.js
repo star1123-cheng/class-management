@@ -9,6 +9,7 @@
 
   var ERROR_TEXT = {
     UNAUTHORIZED: '存取碼錯誤或尚未設定，請重新輸入。',
+    FORBIDDEN: '這台裝置登入的是教室碼，這個功能需要導師碼。',
     INVALID_INPUT: '資料格式不正確，請檢查後再試一次。',
     NOT_FOUND: '找不到這筆資料，可能已被刪除，請重新整理。',
     BOARD_FULL: '投影已滿 5 項，請先關閉一項。',
@@ -47,9 +48,35 @@
   }
   function storeSetJSON(key, value) { return storeSet(key, JSON.stringify(value)); }
 
-  function getCode() { return storeGet(CODE_KEY) || ''; }
-  function setCode(code) { storeSet(CODE_KEY, code); }
-  function clearCode() { storeRemove(CODE_KEY); }
+  /* ---------- 存取碼 ----------
+   * 「記住在這台裝置」存在 localStorage；「暫時登入」存在 sessionStorage（關閉分頁就消失）。
+   * 暫時登入優先，讓導師在班級電腦上用導師碼操作時，不會把導師碼留在電腦上。
+   */
+  function sessionGet() {
+    try { return window.sessionStorage.getItem(CODE_KEY); } catch (e) { return null; }
+  }
+  function sessionSet(v) {
+    try { window.sessionStorage.setItem(CODE_KEY, v); } catch (e) { /* 忽略 */ }
+  }
+  function sessionRemove() {
+    try { window.sessionStorage.removeItem(CODE_KEY); } catch (e) { /* 忽略 */ }
+  }
+  function getCode() { return sessionGet() || storeGet(CODE_KEY) || ''; }
+  function setCode(code, remember) {
+    if (remember === false) {
+      sessionSet(code);
+    } else {
+      storeSet(CODE_KEY, code);
+      sessionRemove();
+    }
+  }
+  /** 只清除目前正在使用的那一組（暫時登入優先） */
+  function clearActiveCode() {
+    if (sessionGet()) sessionRemove();
+    else storeRemove(CODE_KEY);
+  }
+  function clearCode() { sessionRemove(); storeRemove(CODE_KEY); }
+  function isTempLogin() { return !!sessionGet(); }
 
   /* ---------- API ---------- */
   async function api(action, params, opts) {
@@ -157,16 +184,28 @@
 
   /* ---------- 存取碼輸入視窗 ---------- */
   var gateOpen = null;
-  function codeGate(message) {
+  /**
+   * 存取碼輸入視窗
+   * opts.teacherOnly：這一頁需要導師碼（記錄頁、設定頁），輸入教室碼會被拒絕
+   * opts.remember：「記住在這台裝置」預設是否勾選
+   */
+  function codeGate(message, opts) {
     if (gateOpen) return gateOpen;
+    opts = opts || {};
     gateOpen = new Promise(function (resolve) {
-      var input = h('input', { type: 'password', class: 'input', placeholder: '存取碼', autocomplete: 'current-password', 'aria-label': '存取碼' });
+      var input = h('input', { type: 'password', class: 'input', placeholder: opts.teacherOnly ? '導師碼' : '導師碼或教室碼', autocomplete: 'current-password', 'aria-label': '存取碼' });
+      var remember = h('input', { type: 'checkbox' });
+      remember.checked = opts.remember !== false;
       var err = h('p', { class: 'gate-error', role: 'alert' });
       var btn = h('button', { type: 'submit', class: 'btn btn-primary', text: '確認' });
+      var links = opts.teacherOnly ? h('p', { class: 'gate-links' },
+        '只要投影或抽籤？前往 ', h('a', { href: 'board.html', text: '投影頁' }), '、', h('a', { href: 'lottery.html', text: '抽籤頁' })) : null;
       var form = h('form', { class: 'gate-box' },
-        h('h2', { text: '請輸入存取碼' }),
-        h('p', { class: 'gate-hint', text: message || '存取碼由導師在 GAS 指令碼屬性設定，輸入一次後會記在這台裝置的瀏覽器。' }),
-        input, err, btn);
+        h('h2', { text: opts.teacherOnly ? '請輸入導師碼' : '請輸入存取碼' }),
+        h('p', { class: 'gate-hint', text: message || '導師的裝置輸入「導師碼」；班級電腦輸入「教室碼」。' }),
+        input,
+        h('label', { class: 'gate-remember' }, remember, ' 記住在這台裝置（班級電腦輸入導師碼時請不要勾選）'),
+        err, btn, links);
       var wrap = h('div', { class: 'gate', role: 'dialog', 'aria-modal': 'true' }, form);
       form.addEventListener('submit', async function (e) {
         e.preventDefault();
@@ -176,8 +215,14 @@
         btn.textContent = '檢查中…';
         err.textContent = '';
         try {
-          await api('ping', {}, { code: code });
-          setCode(code);
+          var d = await api('ping', {}, { code: code });
+          if (opts.teacherOnly && d.role !== 'teacher') {
+            err.textContent = '這是教室碼，這一頁需要導師碼。';
+            btn.disabled = false;
+            btn.textContent = '確認';
+            return;
+          }
+          setCode(code, remember.checked);
           wrap.remove();
           gateOpen = null;
           resolve(code);
@@ -194,20 +239,29 @@
   }
 
   /** 沒有存取碼時先跳出輸入視窗，再執行頁面初始化 */
-  async function requireCode() {
+  async function requireCode(opts) {
     if (!(window.APP_CONFIG || {}).GAS_URL) {
       toast(ERROR_TEXT.NO_CONFIG, 'error');
       return false;
     }
-    if (!getCode()) await codeGate();
+    if (!getCode()) await codeGate(null, opts);
     return true;
   }
 
-  /** 遇到 UNAUTHORIZED 時清除存取碼並要求重新輸入，成功後重新整理頁面 */
-  function handleAuth(err) {
+  /**
+   * UNAUTHORIZED：清除目前的存取碼並要求重新輸入。
+   * FORBIDDEN：這台裝置是教室碼，要求輸入導師碼（預設只暫時登入，不留在電腦上）。
+   * 成功後重新整理頁面。
+   */
+  function handleAuth(err, opts) {
     if (err && err.code === 'UNAUTHORIZED') {
-      clearCode();
-      codeGate('存取碼錯誤或已變更，請重新輸入。').then(function () { location.reload(); });
+      clearActiveCode();
+      codeGate('存取碼錯誤或已變更，請重新輸入。', opts).then(function () { location.reload(); });
+      return true;
+    }
+    if (err && err.code === 'FORBIDDEN') {
+      codeGate('這台裝置目前登入的是教室碼，只能使用投影頁與抽籤頁。要使用這一頁，請輸入導師碼。', { teacherOnly: true, remember: false })
+        .then(function () { location.reload(); });
       return true;
     }
     return false;
@@ -231,6 +285,7 @@
     getCode: getCode,
     setCode: setCode,
     clearCode: clearCode,
+    isTempLogin: isTempLogin,
     store: { get: storeGet, set: storeSet, remove: storeRemove, getJSON: storeGetJSON, setJSON: storeSetJSON },
     h: h,
     clear: clear,

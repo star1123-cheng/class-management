@@ -12,19 +12,35 @@
     el.className = 'status-line' + (ok === true ? ' ok' : ok === false ? ' bad' : '');
   }
 
-  function refreshCodeHint() {
-    setStatus($('codeStatus'), App.getCode() ? '這台裝置已儲存存取碼。' : '這台裝置尚未儲存存取碼。');
+  var ROLE_NAME = { teacher: '導師碼', display: '教室碼' };
+
+  /** 顯示目前登入狀態：哪一組存取碼、是否只暫時登入 */
+  async function refreshCodeHint() {
+    if (!App.getCode()) { setStatus($('codeStatus'), '這台裝置尚未儲存存取碼。'); return; }
+    var where = App.isTempLogin() ? '（只在這個分頁暫時登入）' : '（已記住在這台裝置）';
+    try {
+      var d = await App.api('ping');
+      setStatus($('codeStatus'), '目前登入：' + (ROLE_NAME[d.role] || '存取碼') + where + '。', true);
+    } catch (e) {
+      setStatus($('codeStatus'), '目前的存取碼無法使用：' + App.errorText(e), false);
+    }
   }
 
   $('btnSaveCode').addEventListener('click', async function () {
     var code = $('codeInput').value.trim();
+    var remember = $('codeRemember').checked;
     if (!code) { setStatus($('codeStatus'), '請先輸入存取碼。', false); return; }
     setStatus($('codeStatus'), '測試連線中…');
     try {
-      await App.api('ping', {}, { code: code });
-      App.setCode(code);
+      var d = await App.api('ping', {}, { code: code });
+      App.setCode(code, remember);
       $('codeInput').value = '';
-      setStatus($('codeStatus'), '連線成功，存取碼已儲存。', true);
+      var where = remember ? '已記住在這台裝置' : '只在這個分頁暫時登入，關閉分頁後就會登出';
+      if (d.role === 'display') {
+        setStatus($('codeStatus'), '連線成功：這是教室碼（' + where + '）。這台裝置可以使用投影頁與抽籤頁，記錄頁與設定頁需要導師碼。', true);
+      } else {
+        setStatus($('codeStatus'), '連線成功：導師碼（' + where + '）。', true);
+      }
       loadAll();
     } catch (e) {
       setStatus($('codeStatus'), '連線失敗：' + App.errorText(e), false);
@@ -36,14 +52,14 @@
     setStatus($('codeStatus'), '測試連線中…');
     try {
       var d = await App.api('ping');
-      setStatus($('codeStatus'), '連線成功（伺服器時間 ' + App.fmtMD(d.serverTime) + ' ' + App.fmtHM(d.serverTime) + '）。', true);
+      setStatus($('codeStatus'), '連線成功：' + (ROLE_NAME[d.role] || '存取碼') + '（伺服器時間 ' + App.fmtMD(d.serverTime) + ' ' + App.fmtHM(d.serverTime) + '）。', true);
     } catch (e) {
       setStatus($('codeStatus'), '連線失敗：' + App.errorText(e), false);
     }
   });
 
   $('btnClearCode').addEventListener('click', function () {
-    if (!confirm('確定要清除這台裝置的存取碼嗎？之後需要重新輸入。')) return;
+    if (!confirm('確定要清除這台裝置的存取碼（包含暫時登入）嗎？之後需要重新輸入。')) return;
     App.clearCode();
     refreshCodeHint();
   });
@@ -60,8 +76,10 @@
       renderPool();
       renderDraws();
     } catch (e) {
-      if (e.code === 'UNAUTHORIZED') {
-        setStatus($('codeStatus'), App.errorText(e), false);
+      if (e.code === 'UNAUTHORIZED' || e.code === 'FORBIDDEN') {
+        // 設定頁上方就是登入欄，不另外跳出視窗
+        if (e.code === 'FORBIDDEN') setStatus($('codeStatus'), '目前登入的是教室碼，設定頁的資料需要導師碼。請在上方輸入導師碼（班級電腦請取消「記住在這台裝置」）。', false);
+        else setStatus($('codeStatus'), App.errorText(e), false);
         return;
       }
       App.toast('載入失敗：' + App.errorText(e), 'error');
@@ -359,11 +377,10 @@
   }
 
   /* ============ 啟動 ============ */
-  refreshCodeHint();
   renderAmount();
   if (!(window.APP_CONFIG || {}).GAS_URL) {
     setStatus($('codeStatus'), App.ERROR_TEXT.NO_CONFIG, false);
   } else {
-    loadAll();
+    refreshCodeHint().then(loadAll);
   }
 })();

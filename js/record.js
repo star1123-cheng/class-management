@@ -61,7 +61,7 @@
       setCurrent(want);
       render();
     } catch (e) {
-      if (App.handleAuth(e)) return;
+      if (App.handleAuth(e, { teacherOnly: true })) return;
       $('curName').textContent = '載入失敗';
       App.toast(App.errorText(e), 'error');
     }
@@ -202,7 +202,7 @@
       App.toast('已儲存 ' + changes.length + ' 筆變更');
       await load(state.currentId);
     } catch (e) {
-      if (App.handleAuth(e)) return;
+      if (App.handleAuth(e, { teacherOnly: true })) return;
       App.toast('儲存失敗：' + App.errorText(e) + '（變更仍保留，可再按一次儲存）', 'error');
     } finally {
       state.busy = false;
@@ -234,7 +234,7 @@
     try {
       await fn();
     } catch (e) {
-      if (App.handleAuth(e)) return;
+      if (App.handleAuth(e, { teacherOnly: true })) return;
       App.toast(e.code === 'BOARD_FULL' ? '請先關閉一項' : App.errorText(e), 'error');
     } finally {
       state.busy = false;
@@ -315,7 +315,7 @@
       $('btnCancelNew').click();
       await load(a.id);
     } catch (ex) {
-      if (App.handleAuth(ex)) return;
+      if (App.handleAuth(ex, { teacherOnly: true })) return;
       App.toast('建立失敗：' + App.errorText(ex), 'error');
     } finally {
       btn.disabled = false;
@@ -343,5 +343,5 @@
   });
 
   /* ---------- 啟動 ---------- */
-  App.requireCode().then(function (ok) { if (ok) load(); });
+  App.requireCode({ teacherOnly: true }).then(function (ok) { if (ok) load(); });
 })();

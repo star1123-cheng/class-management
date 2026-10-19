@@ -417,3 +417,8 @@ button, input { font: inherit; color: inherit; }
   .btn-next { font-size: 20px !important; min-height: 52px !important; }
   .skip-float { font-size: 15px; }
 }
+
+/* 存取碼視窗：記住選項與頁面連結 */
+.gate-remember { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-2); margin: 10px 0 0; cursor: pointer; }
+.gate-remember input { width: 18px; height: 18px; margin-top: 2px; flex: none; accent-color: var(--gold); }
+.gate-links { font-size: 14px; color: var(--text-2); margin: 12px 0 0; text-align: center; }

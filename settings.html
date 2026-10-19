@@ -21,9 +21,13 @@
     <!-- 1. 存取碼 -->
     <section class="card" id="secCode">
       <h2>存取碼</h2>
-      <p class="muted">存取碼只會存在這台裝置的瀏覽器，不會寫在程式或網址裡。</p>
+      <p class="muted">有兩組存取碼：「導師碼」可以使用全部功能，只輸入在導師自己的裝置；「教室碼」只能使用投影頁與抽籤頁，輸入在班級電腦。存取碼只會存在這台裝置的瀏覽器，不會寫在程式或網址裡。</p>
       <label class="field">輸入存取碼
-        <input id="codeInput" class="input" type="password" autocomplete="current-password" placeholder="由導師在 GAS 指令碼屬性設定">
+        <input id="codeInput" class="input" type="password" autocomplete="current-password" placeholder="導師碼或教室碼">
+      </label>
+      <label class="gate-remember" style="margin-bottom:10px">
+        <input id="codeRemember" type="checkbox" checked>
+        記住在這台裝置（在班級電腦輸入導師碼時請取消勾選，關閉分頁後就會登出）
       </label>
       <div class="row">
         <button id="btnSaveCode" class="btn btn-primary" type="button">儲存並測試連線</button>

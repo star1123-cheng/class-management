@@ -2,7 +2,9 @@
  * 班級作業缺交系統與雲端一番賞：後端（Google Apps Script）
  *
  * 使用前：
- * 1. 到「專案設定 → 指令碼屬性」新增 ACCESS_CODE（值由導師自訂，不要寫在程式裡）。
+ * 1. 到「專案設定 → 指令碼屬性」新增兩組存取碼（值由導師自訂，不要寫在程式裡）：
+ *    ACCESS_CODE  導師碼：可以使用全部功能（只輸入在導師自己的裝置）
+ *    DISPLAY_CODE 教室碼：只能看投影、看抽籤頁與執行「抽」（輸入在班級電腦）
  * 2. 執行 setup() 建立工作表。
  * 3. 部署為網頁應用程式（執行身分：我；存取權：任何人），安全性靠存取碼。
  *
@@ -74,7 +76,11 @@ var DEFAULT_CARDS = [
 function setup() {
   var code = PropertiesService.getScriptProperties().getProperty('ACCESS_CODE');
   if (!code) {
-    throw new Error('尚未設定存取碼：請先到「專案設定（齒輪圖示）→ 指令碼屬性」新增屬性「ACCESS_CODE」，值由導師自行決定，儲存後再重新執行 setup()。');
+    throw new Error('尚未設定導師碼：請先到「專案設定（齒輪圖示）→ 指令碼屬性」新增屬性「ACCESS_CODE」，值由導師自行決定，儲存後再重新執行 setup()。');
+  }
+  var displayCode = PropertiesService.getScriptProperties().getProperty('DISPLAY_CODE');
+  if (displayCode && displayCode === code) {
+    throw new Error('教室碼 DISPLAY_CODE 不可以和導師碼 ACCESS_CODE 相同，請改成不同的值後再執行 setup()。');
   }
   var ss = ss_();
   var report = [];
@@ -112,6 +118,7 @@ function setup() {
     }
   });
 
+  if (!displayCode) report.push('提醒：尚未設定教室碼 DISPLAY_CODE，班級電腦目前只能用導師碼登入。');
   console.log(report.join('\n'));
   return report.join('\n');
 }
@@ -134,10 +141,15 @@ function doPost(e) {
   if (!req || typeof req !== 'object' || Array.isArray(req)) return out_(fail_('INVALID_INPUT'));
 
   // 一律先驗證存取碼，失敗時不回傳任何資料
-  if (!checkCode_(req.code)) return out_(fail_('UNAUTHORIZED'));
+  var role = roleOf_(req.code);
+  if (!role) return out_(fail_('UNAUTHORIZED'));
 
   var handler = ACTIONS[req.action];
   if (typeof handler !== 'function') return out_(fail_('INVALID_INPUT'));
+
+  // 教室碼只能使用投影與抽籤需要的功能，其餘一律拒絕
+  if (role !== 'teacher' && DISPLAY_ACTIONS.indexOf(req.action) === -1) return out_(fail_('FORBIDDEN'));
+  req.role = role;
 
   try {
     return out_(ok_(handler(req)));
@@ -148,8 +160,11 @@ function doPost(e) {
   }
 }
 
+// 教室碼（DISPLAY_CODE）可以呼叫的 API
+var DISPLAY_ACTIONS = ['ping', 'getBoard', 'getLottery', 'draw'];
+
 var ACTIONS = {
-  ping: function () { return { serverTime: nowIso_() }; },
+  ping: function (req) { return { serverTime: nowIso_(), role: req.role }; },
   getState: getState_,
   getBoard: getBoard_,
   importRoster: importRoster_,
@@ -742,8 +757,15 @@ function withLock_(fn) {
  * 小工具
  * ============================================================ */
 
-function checkCode_(code) {
-  var expected = PropertiesService.getScriptProperties().getProperty('ACCESS_CODE');
+/** 回傳 'teacher'（導師碼）、'display'（教室碼）或 null（錯誤） */
+function roleOf_(code) {
+  var props = PropertiesService.getScriptProperties();
+  if (checkCode_(code, props.getProperty('ACCESS_CODE'))) return 'teacher';
+  if (checkCode_(code, props.getProperty('DISPLAY_CODE'))) return 'display';
+  return null;
+}
+
+function checkCode_(code, expected) {
   if (!expected || typeof code !== 'string' || code.length === 0) return false;
   if (code.length !== expected.length) return false;
   var diff = 0;
