@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>缺交作業投影</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="board-page">
+  <div class="board-stage" id="stage">
+    <header class="board-head">
+      <h1 id="boardTitle">缺交作業</h1>
+      <div class="meta">
+        <span id="updatedAt">載入中…</span>
+        <button id="btnFull" class="btn-full" type="button">全螢幕</button>
+      </div>
+    </header>
+    <main class="board-rows" id="rows"></main>
+    <div id="emptyMsg" class="board-empty-msg" hidden>目前沒有上投影的作業</div>
+    <div id="offline" class="board-offline" hidden>連線中斷</div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/board.js"></script>
+</body>
+</html>

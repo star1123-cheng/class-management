@@ -1,0 +1,23 @@
+# 機敏檔案：一律不進 Git
+.env
+.env.*
+*.pem
+*.key
+*credentials*.json
+*serviceAccountKey*.json
+.clasprc.json
+node_modules/
+dist/
+
+# 背景音樂檔由導師自行放入，預設不上傳（是否可公開請先確認 NCS 使用政策）
+assets/*.mp3
+
+# 真實名單請勿放進 repo
+*名單*.csv
+roster*.csv
+!template-roster.csv
+
+# 系統檔
+.DS_Store
+Thumbs.db
+desktop.ini
