@@ -24,3 +24,4 @@ desktop.ini
 
 # clasp 本機設定（測試版與正式版的 scriptId 不同，只留在這台電腦）
 .clasp.json
+.clasp-*.json
