@@ -130,6 +130,7 @@ label.field > .input { margin-top: 4px; color: var(--text); }
 .current-card .name { font-size: 22px; font-weight: 800; line-height: 1.3; margin: 2px 0 10px; word-break: break-word; }
 .missing-count { font-size: 16px; font-weight: 700; color: var(--missing); white-space: nowrap; }
 .missing-count.zero { color: var(--done); }
+.missing-count.pending { color: var(--text-2); }
 
 .seat-grid {
   display: grid;
@@ -152,8 +153,13 @@ label.field > .input { margin-top: 4px; color: var(--text); }
 .seat.madeup::after {
   content: "補"; position: absolute; top: 2px; right: 4px; font-size: 10px; color: var(--text-2); font-weight: 600;
 }
+.seat.done { background: var(--done); border-color: var(--done); color: #FFFFFF; font-weight: 800; }
+.seat.done.madeup::after { color: #E4F2D8; }
 .seat.changed { box-shadow: 0 0 0 2px #F3B27E inset; }
 .seat.missing.changed { box-shadow: 0 0 0 3px #FFD2BF inset; }
+.seat.done.changed { box-shadow: 0 0 0 3px #CFE8BD inset; }
+.grid-hint { margin: 0 0 10px; font-size: 14px; color: var(--text-2); line-height: 1.5; }
+.grid-hint:empty { display: none; }
 .empty-hint { text-align: center; color: var(--text-2); padding: 18px 8px; }
 
 .makeup-banner {
@@ -350,6 +356,11 @@ body.board-page {
   display: inline-flex; align-items: center; justify-content: center;
   width: calc(76 * var(--s)); height: calc(76 * var(--s)); border-radius: 50%;
   background: var(--done); color: #fff; font-size: calc(50 * var(--s));
+}
+.board-pending {
+  color: var(--text-2);
+  font-size: calc(56 * var(--s));
+  font-weight: 700;
 }
 .board-offline {
   position: absolute; right: calc(16 * var(--s)); bottom: calc(10 * var(--s));

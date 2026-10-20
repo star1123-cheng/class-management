@@ -25,7 +25,11 @@ var SHEET = {
 
 var HEADERS = {};
 HEADERS[SHEET.ROSTER] = ['班級代號', '座號', '在籍'];
-HEADERS[SHEET.ASSIGN] = ['ID', '日期', '名稱', '上投影', '投影順序', '建立時間'];
+HEADERS[SHEET.ASSIGN] = ['ID', '日期', '名稱', '上投影', '投影順序', '建立時間', '已點收'];
+
+// 後來才加入的欄位：舊試算表缺少時自動補在最右邊，既有資料列填入預設值
+var ADDED_COLUMNS = {};
+ADDED_COLUMNS[SHEET.ASSIGN] = { '已點收': '是' };   // 舊作業都是用「點缺交」記錄的，視為已點收
 HEADERS[SHEET.MISSING] = ['作業ID', '座號', '狀態', '更新時間'];
 HEADERS[SHEET.TICKETS] = ['座號', '異動', '原因', '時間'];
 HEADERS[SHEET.POOL] = ['號碼', '類型', '實物名稱', '已抽', '抽出座號', '抽出時間'];
@@ -240,7 +244,7 @@ function getBoard_() {
   return {
     items: items.map(function (a) {
       var seats = Object.keys(bySeat[a.id] || {}).map(Number).sort(function (x, y) { return x - y; });
-      return { id: a.id, name: a.name, date: a.date, order: a.order, missing: seats };
+      return { id: a.id, name: a.name, date: a.date, order: a.order, recorded: a.recorded, missing: seats };
     }),
     activeCount: Object.keys(active).length,
     serverTime: nowIso_()
@@ -327,7 +331,8 @@ function createAssignment_(req) {
       '名稱': name,
       '上投影': canBoard ? '是' : '否',
       '投影順序': canBoard ? onBoard + 1 : '',
-      '建立時間': nowIso_()
+      '建立時間': nowIso_(),
+      '已點收': '否'
     };
     appendRows_(t, [obj]);
     return assignOut_(objToAssign_(obj));
@@ -369,6 +374,8 @@ function deleteAssignment_(req) {
 function saveMissing_(req) {
   var id = cleanId_(req.assignmentId);
   if (!Array.isArray(req.changes) || req.changes.length === 0 || req.changes.length > 99) throw apiError_('INVALID_INPUT');
+  // markRecorded：第一次點收完成（沒點到的已一併送成「缺交」），把作業標為已點收
+  if (req.markRecorded !== undefined && typeof req.markRecorded !== 'boolean') throw apiError_('INVALID_INPUT');
   var seen = {};
   var changes = req.changes.map(function (c) {
     if (!c || typeof c !== 'object') throw apiError_('INVALID_INPUT');
@@ -381,7 +388,9 @@ function saveMissing_(req) {
 
   return withLock_(function () {
     var a = table_(SHEET.ASSIGN);
-    if (!find_(a.rows, function (r) { return String(r['ID']) === id; })) throw apiError_('NOT_FOUND');
+    var assignRow = find_(a.rows, function (r) { return String(r['ID']) === id; });
+    if (!assignRow) throw apiError_('NOT_FOUND');
+    if (req.markRecorded && !yes_(assignRow['已點收'])) setFields_(a, assignRow._row, { '已點收': '是' });
 
     var t = table_(SHEET.MISSING);
     var bySeat = {};
@@ -875,12 +884,13 @@ function objToAssign_(r) {
     name: String(r['名稱'] || ''),
     onBoard: onBoard,
     order: onBoard ? toInt_(r['投影順序']) : null,
-    createdAt: String(r['建立時間'] || '')
+    createdAt: String(r['建立時間'] || ''),
+    recorded: yes_(r['已點收'])
   };
 }
 
 function assignOut_(a) {
-  return { id: a.id, date: a.date, name: a.name, onBoard: a.onBoard, order: a.order, createdAt: a.createdAt };
+  return { id: a.id, date: a.date, name: a.name, onBoard: a.onBoard, order: a.order, createdAt: a.createdAt, recorded: a.recorded };
 }
 
 function byOrder_(a, b) {
@@ -917,6 +927,25 @@ function ss_() {
 }
 
 /** 建立工作表、寫入標題列，並把需要的欄位設成純文字格式 */
+/** 舊試算表缺少後來加入的欄位時，補上標題並為既有資料列填入預設值；有補欄位就回傳 true */
+function addMissingColumns_(sheet, name, idx, lastRow) {
+  var added = ADDED_COLUMNS[name];
+  if (!added) return false;
+  var missing = Object.keys(added).filter(function (h) { return !(h in idx); });
+  if (!missing.length) return false;
+  var col = Math.max(sheet.getLastColumn(), 1);
+  missing.forEach(function (h) {
+    col++;
+    sheet.getRange(1, col).setValue(h).setFontWeight('bold');
+    if (lastRow > 1) {
+      var fill = [];
+      for (var i = 2; i <= lastRow; i++) fill.push([added[h]]);
+      sheet.getRange(2, col, lastRow - 1, 1).setValues(fill);
+    }
+  });
+  return true;
+}
+
 function createSheet_(ss, name) {
   var sheet = ss.insertSheet(name);
   var header = HEADERS[name];
@@ -939,6 +968,7 @@ function table_(name) {
   var header = values[0].map(function (h) { return String(h).trim(); });
   var idx = {};
   header.forEach(function (h, i) { if (h && !(h in idx)) idx[h] = i; });
+  if (addMissingColumns_(sheet, name, idx, lastRow)) return table_(name);
   HEADERS[name].forEach(function (h) {
     if (!(h in idx)) throw new Error('工作表「' + name + '」缺少欄位「' + h + '」。');
   });

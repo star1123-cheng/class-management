@@ -92,26 +92,26 @@
     body.appendChild(h('p', { class: 'bag-empty', text: text }));
   }
 
-  /** 票券造型的卡片；opts.big 放大顯示、opts.onclick 可點擊 */
+  /** 收藏卡牌造型的卡片（和揭曉時同一種）；opts.big 放大顯示、opts.onclick 可點擊 */
   function ticket(card, opts) {
     opts = opts || {};
     var used = card.status === '已使用';
     var meta = opts.meta !== undefined ? opts.meta
-      : used ? '已使用　' + App.fmtMD(card.usedAt)
-      : card.gotAt ? App.fmtMD(card.gotAt) + ' 取得' + (card.source === CARD_LUCKY ? '（幸運女神）' : '') : '';
-    var el = h(opts.onclick ? 'button' : 'div', {
-      type: opts.onclick ? 'button' : null,
-      class: 'mini-ticket' + (opts.big ? ' big' : '') + (used ? ' used' : '') + (opts.cls ? ' ' + opts.cls : ''),
-      onclick: opts.onclick || null,
-      'aria-label': card.name + (used ? '，已使用' : '')
-    },
-      h('span', { class: 'mt-barcode', 'aria-hidden': 'true' }),
-      h('span', { class: 'mt-body' },
-        h('span', { class: 'mt-meta', text: meta }),
-        h('span', { class: 'mt-name', text: card.name }),
-        h('span', { class: 'mt-desc', text: card.description || '' })),
-      used ? h('span', { class: 'stamp', 'aria-hidden': 'true', text: '已使用' }) : null);
-    return el;
+      : used ? App.fmtMD(card.usedAt) + ' 使用'
+      : card.gotAt ? App.fmtMD(card.gotAt) + ' 取得' : '';
+    var from = !used && card.source === CARD_LUCKY ? '🍀 幸運女神' : '';
+    return LotteryFx.cardEl(card, {
+      tag: opts.onclick ? 'button' : 'div',
+      topLeft: meta,
+      topRight: from,
+      props: {
+        type: opts.onclick ? 'button' : null,
+        class: 'mini' + (opts.big ? ' big' : '') + (used ? ' used' : '') + (opts.cls ? ' ' + opts.cls : ''),
+        onclick: opts.onclick || null,
+        'aria-label': card.name + (used ? '，已使用' : '')
+      },
+      extra: used ? h('span', { class: 'stamp', 'aria-hidden': 'true', text: '已使用' }) : null
+    });
   }
 
   function renderList() {

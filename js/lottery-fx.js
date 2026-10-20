@@ -198,17 +198,51 @@
     stage.appendChild(box);
   }
 
+  /* ---------- 收藏卡牌 ---------- */
+  // 每張卡的圖示與色相；試算表新增的卡片沒有對照時，用卡名算出固定色相、圖示用 ✦
+  var CARD_ART = {
+    '我是DJ': ['🎧', 285], '導演': ['🎬', 355], '神隊友': ['🤝', 205], '財神爺': ['💰', 42],
+    '免當值日生': ['😎', 160], '聯絡簿代抄': ['📒', 25], '免死金牌': ['🏅', 50], '老師來幫忙': ['🧑‍🏫', 180],
+    '掃地Pass': ['🧹', 95], '幸運女神': ['🍀', 325], '作業-1': ['📝', 220], '點數卡': ['💎', 265],
+    '再抽一次': ['🔄', 190], '野餐卡': ['🧺', 120], '白日夢卡': ['☁️', 240], '榮譽之星': ['🌟', 35]
+  };
+  function cardArt(name) {
+    var a = CARD_ART[name];
+    if (a) return { icon: a[0], hue: a[1] };
+    var hash = 0;
+    for (var i = 0; i < (name || '').length; i++) hash = (hash * 31 + name.charCodeAt(i)) % 360;
+    return { icon: '✦', hue: hash };
+  }
+
+  /**
+   * 直式收藏卡牌（揭曉與背包共用）
+   * card：{ name, description }；opts.topLeft／opts.topRight：上方小字；opts.tag：外層標籤（預設 div）
+   */
+  function cardEl(card, opts) {
+    opts = opts || {};
+    var art = cardArt(card.name);
+    var props = Object.assign({}, opts.props || {});
+    props.class = 'tcard' + (props.class ? ' ' + props.class : '');
+    props.style = '--h:' + art.hue + (props.style ? ';' + props.style : '');
+    return h(opts.tag || 'div', props,
+      h('span', { class: 'tc-inner' },
+        h('span', { class: 'tc-top' },
+          h('span', { text: opts.topLeft || '' }),
+          h('span', { text: opts.topRight || '' })),
+        h('span', { class: 'tc-art', 'aria-hidden': 'true' }, h('span', { class: 'tc-icon', text: art.icon })),
+        h('span', { class: 'tc-name', text: card.name }),
+        h('span', { class: 'tc-desc', text: card.description || '' }),
+        h('span', { class: 'tc-foot', 'aria-hidden': 'true', text: '✦ 雲端一番賞 ✦' })),
+      h('span', { class: 'tc-shine', 'aria-hidden': 'true' }),
+      opts.extra || null);
+  }
+
   function revealCard(stage, result, opts) {
     var flip = h('div', { class: 'flip', style: '--flip-ms:' + opts.flipMs + 'ms' },
       h('div', { class: 'flip-inner' },
-        h('div', { class: 'flip-face flip-back', text: '★' }),
+        h('div', { class: 'flip-face flip-back' }, h('span', { text: '✦' })),
         h('div', { class: 'flip-face' },
-          h('div', { class: 'ticket' },
-            h('div', { class: 'ticket-barcode', 'aria-hidden': 'true' }),
-            h('div', { class: 'ticket-body' },
-              h('div', { class: 'ticket-no', text: 'No. ' + result.number + '　・　' + result.seat + ' 號' }),
-              h('div', { class: 'ticket-name', text: result.name }),
-              h('div', { class: 'ticket-desc', text: result.description || '' }))))));
+          cardEl(result, { topLeft: 'No. ' + result.number, topRight: result.seat + ' 號' }))));
     stage.appendChild(flip);
     if (opts.flipMs <= 0) flip.classList.add('show');
     else requestAnimationFrame(function () { requestAnimationFrame(function () { flip.classList.add('show'); }); });
@@ -263,6 +297,7 @@
     tearPaper: tearPaper,
     revealPrize: revealPrize,
     revealCard: revealCard,
+    cardEl: cardEl,
     confetti: confetti
   };
 })();

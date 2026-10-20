@@ -4,7 +4,7 @@
  * 沒網路時才用手機上的備份顯示畫面。
  * 只處理本站的 GET 請求；GAS API（POST、script.google.com）與 YouTube 一律不經過快取，資料永遠是即時的。
  */
-var CACHE = 'class-mgmt-v2';
+var CACHE = 'class-mgmt-v3';
 var SHELL = [
   './',
   './index.html',

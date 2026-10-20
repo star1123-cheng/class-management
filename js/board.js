@@ -42,6 +42,12 @@
       App.clear(r.seats);
       r.seats.dataset.count = item ? item.missing.length : 0;
       if (!item) return;
+      // 尚未點收的作業：還不知道誰沒交，不能顯示成「全部交齊」
+      if (item.recorded === false) {
+        r.seats.dataset.count = 0;
+        r.seats.appendChild(h('div', { class: 'board-pending', text: '尚未點收' }));
+        return;
+      }
       if (item.missing.length === 0) {
         r.seats.appendChild(h('div', { class: 'board-done', text: '全部交齊' }));
         return;

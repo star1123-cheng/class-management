@@ -1,4 +1,8 @@
-/* 記錄頁：選作業、點座號標記缺交／補交、按儲存才送出 */
+/*
+ * 記錄頁：選作業、點「有交」的座號、按儲存才送出
+ * 尚未點收的作業：點的是有交的人；第一次按「儲存」時，沒點到的人一律記為缺交，作業標為已點收。
+ * 已點收的作業：綠色＝有交、紅色＝缺交，點一下可以修正；補交模式下點紅色會改成「已補交」。
+ */
 (function () {
   'use strict';
   var h = App.h;
@@ -20,7 +24,14 @@
   function activeSeats() {
     return state.roster.filter(function (r) { return r.active; }).map(function (r) { return r.seat; });
   }
+  function isRecorded() {
+    var a = current();
+    // 舊版後端不會回傳 recorded，視為已點收（沿用舊的「點缺交」行為）
+    return !!(a && a.recorded !== false);
+  }
+  /** 伺服器上的狀態；尚未點收的作業一律是「未點」 */
   function serverStatus(seat) {
+    if (!isRecorded()) return '未點';
     var m = state.missing[state.currentId];
     return (m && m[seat]) || '正常';
   }
@@ -110,11 +121,16 @@
       return;
     }
     var disabled = !state.currentId;
+    var hint = $('gridHint');
+    hint.textContent = !state.currentId ? ''
+      : isRecorded() ? '綠色＝有交、紅色＝缺交，點一下可以修正。學生補交請開「補交模式」。'
+      : '請點「有交」的座號；按「儲存」後，沒點到的人會記為缺交。';
     seats.forEach(function (seat) {
       var st = statusOf(seat);
       var changed = Object.prototype.hasOwnProperty.call(state.pending, seat);
-      var cls = 'seat' + (st === '缺交' ? ' missing' : '') + (st === '已補交' ? ' madeup' : '') + (changed ? ' changed' : '');
-      var label = seat + ' 號，' + (st === '缺交' ? '缺交' : st === '已補交' ? '已補交' : '已交') + (changed ? '（未儲存）' : '');
+      var cls = 'seat' + (st === '缺交' ? ' missing' : '') + (st === '正常' || st === '已補交' ? ' done' : '')
+        + (st === '已補交' ? ' madeup' : '') + (changed ? ' changed' : '');
+      var label = seat + ' 號，' + ({ '缺交': '缺交', '已補交': '已補交', '正常': '有交', '未點': '還沒點' })[st] + (changed ? '（未儲存）' : '');
       grid.appendChild(h('button', {
         type: 'button', class: cls, 'aria-label': label, disabled: disabled,
         onclick: function () { tap(seat); }
@@ -122,16 +138,33 @@
     });
   }
 
+  /** 尚未點收時，沒點到（之後會記為缺交）的座號 */
+  function unmarkedSeats() {
+    return activeSeats().filter(function (s) { return statusOf(s) === '未點'; });
+  }
+
   function renderCount() {
-    var n = activeSeats().filter(function (s) { return statusOf(s) === '缺交'; }).length;
     var el = $('missingCount');
+    if (state.currentId && !isRecorded()) {
+      var seats = activeSeats();
+      el.textContent = '有交 ' + (seats.length - unmarkedSeats().length) + '／' + seats.length;
+      el.className = 'missing-count pending';
+      return;
+    }
+    var n = activeSeats().filter(function (s) { return statusOf(s) === '缺交'; }).length;
     el.textContent = '缺交 ' + n + ' 人';
     el.className = 'missing-count' + (n === 0 ? ' zero' : '');
   }
 
   function renderSave() {
-    var n = Object.keys(state.pending).length;
     var btn = $('btnSave');
+    if (state.currentId && !isRecorded()) {
+      // 尚未點收：沒有點任何人也可以儲存（代表全班都沒交）
+      btn.disabled = state.busy || activeSeats().length === 0;
+      btn.textContent = state.busy ? '儲存中…' : '儲存點收';
+      return;
+    }
+    var n = Object.keys(state.pending).length;
     btn.disabled = n === 0 || state.busy;
     btn.textContent = state.busy ? '儲存中…' : (n ? '儲存（' + n + '）' : '儲存');
   }
@@ -174,12 +207,16 @@
     var cur = statusOf(seat);
     var server = serverStatus(seat);
     var next;
-    if (state.makeup) {
+    if (!isRecorded()) {
+      // 尚未點收：點一下標記有交，再點一下取消
+      if (state.makeup) { App.toast('這份作業還沒點收，請先關閉補交模式，點有交的座號後儲存'); return; }
+      next = cur === '正常' ? '未點' : '正常';
+    } else if (state.makeup) {
       if (cur !== '缺交') { App.toast('補交模式只能點紅色（缺交）座號'); return; }
       next = '已補交';
     } else if (cur === '缺交') {
-      // 取消缺交：回到原本狀態（原本是已補交就回已補交，否則為正常）
-      next = server !== '缺交' ? server : '正常';
+      // 改成有交：原本是已補交就回已補交，否則為準時交（正常）
+      next = server === '已補交' ? '已補交' : '正常';
     } else {
       next = '缺交';
     }
@@ -192,14 +229,30 @@
 
   /* ---------- 儲存 ---------- */
   async function save() {
-    if (!hasPending() || state.busy) return;
-    var changes = Object.keys(state.pending).map(function (s) { return { seat: Number(s), status: state.pending[s] }; });
+    if (state.busy || !state.currentId) return;
+    var first = !isRecorded();
+    var changes;
+    if (first) {
+      // 第一次點收：有點到的是有交，沒點到的一律記為缺交
+      var miss = unmarkedSeats();
+      if (miss.length && !confirm('沒點到的 ' + miss.length + ' 人會記為缺交：\n' + miss.join('、') + ' 號\n\n確定要儲存嗎？')) return;
+      changes = activeSeats().map(function (s) { return { seat: s, status: statusOf(s) === '正常' ? '正常' : '缺交' }; });
+      if (!changes.length) return;
+    } else {
+      if (!hasPending()) return;
+      changes = Object.keys(state.pending).map(function (s) { return { seat: Number(s), status: state.pending[s] }; });
+    }
     state.busy = true;
     renderSave();
     try {
-      await App.api('saveMissing', { assignmentId: state.currentId, changes: changes });
+      await App.api('saveMissing', { assignmentId: state.currentId, changes: changes, markRecorded: first || undefined });
       state.pending = {};
-      App.toast('已儲存 ' + changes.length + ' 筆變更');
+      if (first) {
+        var nMiss = changes.filter(function (c) { return c.status === '缺交'; }).length;
+        App.toast('已點收：有交 ' + (changes.length - nMiss) + ' 人、缺交 ' + nMiss + ' 人');
+      } else {
+        App.toast('已儲存 ' + changes.length + ' 筆變更');
+      }
       await load(state.currentId);
     } catch (e) {
       if (App.handleAuth(e, { teacherOnly: true })) return;
