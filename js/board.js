@@ -38,7 +38,8 @@
     rows.forEach(function (r, i) {
       var item = items[i];
       var inner = r.name.firstChild;
-      inner.textContent = item ? item.name : '';
+      inner.dataset.full = item ? item.name : '';
+      r.name.title = item ? item.name : '';
       App.clear(r.seats);
       r.seats.dataset.count = item ? item.missing.length : 0;
       if (!item) return;
@@ -86,9 +87,18 @@
     var size = NAME_MAX;
     el.style.setProperty('--nf', size);
     var inner = el.firstChild;
-    while (size > NAME_MIN && inner.scrollHeight > el.clientHeight + 1) {
+    var full = inner.dataset.full || '';
+    inner.textContent = full;
+    var over = function () { return inner.scrollHeight > el.clientHeight + 1; };
+    while (size > NAME_MIN && over()) {
       size -= 4;
       el.style.setProperty('--nf', size);
+    }
+    // 最小字級仍放不下：從尾端截斷，補上「…」
+    var len = full.length;
+    while (len > 1 && over()) {
+      len--;
+      inner.textContent = full.slice(0, len) + '…';
     }
   }
 
