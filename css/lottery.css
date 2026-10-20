@@ -422,3 +422,155 @@ button, input { font: inherit; color: inherit; }
 .gate-remember { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; color: var(--text-2); margin: 10px 0 0; cursor: pointer; }
 .gate-remember input { width: 18px; height: 18px; margin-top: 2px; flex: none; accent-color: var(--gold); }
 .gate-links { font-size: 14px; color: var(--text-2); margin: 12px 0 0; text-align: center; }
+.gate-box .gate-cancel { background: transparent; color: var(--text-2); border-color: var(--panel-border); }
+
+/* ---------- 卡片背包 ---------- */
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: calc(.6 * var(--u)); margin-bottom: calc(.5 * var(--u)); }
+.panel-head h2 { margin: 0; }
+.btn-bag { border-color: var(--gold); color: var(--gold); }
+.seat { position: relative; }
+.bag-dot {
+  position: absolute; top: calc(-.35 * var(--u)); right: calc(-.35 * var(--u));
+  min-width: calc(1.1 * var(--u)); height: calc(1.1 * var(--u)); padding: 0 calc(.25 * var(--u));
+  border-radius: 99px; background: var(--ticket); color: #2B1B00; border: 1px solid #000;
+  font-style: normal; font-weight: 800; font-size: calc(.66 * var(--u)); line-height: calc(1.05 * var(--u)); text-align: center;
+}
+.seat:disabled .bag-dot { opacity: .75; }
+/* 放在票券正下方（票券高度 min(56vh, 60vw)，置中） */
+.bag-note {
+  position: absolute; left: 0; right: 0; top: calc(50% + min(28vh, 30vw) + 2vh);
+  margin: 0; text-align: center; font-size: min(3vh, 4.4vw); font-weight: 700; color: var(--glow);
+  opacity: 0; animation: fadein .5s ease-out forwards; animation-delay: var(--delay, 0ms);
+}
+
+.bag-overlay {
+  position: fixed; inset: 0; z-index: 45;
+  background: rgba(10, 8, 28, .86);
+  display: flex; align-items: center; justify-content: center; padding: calc(1.2 * var(--u));
+}
+.bag-box {
+  width: min(96vw, calc(80 * var(--u))); max-height: 94vh;
+  display: flex; flex-direction: column; gap: calc(.8 * var(--u));
+  background: var(--panel); border: 2px solid var(--panel-border); border-radius: calc(1.2 * var(--u));
+  padding: calc(1.2 * var(--u)) calc(1.4 * var(--u));
+}
+.bag-head { display: flex; align-items: center; justify-content: space-between; }
+.bag-head h2 { margin: 0; color: var(--gold); font-size: calc(1.6 * var(--u)); }
+.bag-head .btn { font-size: calc(1 * var(--u)); min-height: calc(2.4 * var(--u)); }
+.bag-seats { display: flex; flex-wrap: wrap; gap: calc(.5 * var(--u)); padding-top: calc(.4 * var(--u)); }
+.bag-seat {
+  position: relative; min-width: calc(2.7 * var(--u)); height: calc(2.3 * var(--u)); padding: 0 calc(.4 * var(--u));
+  border-radius: calc(.5 * var(--u)); border: 2px solid var(--panel-border); background: #322C68;
+  font-size: calc(1 * var(--u)); font-weight: 800; cursor: pointer;
+}
+.bag-seat.selected { border-color: var(--gold); background: #4A3F1A; box-shadow: 0 0 calc(.6 * var(--u)) rgba(255, 197, 61, .5); }
+.bag-seat i {
+  position: absolute; top: calc(-.45 * var(--u)); right: calc(-.45 * var(--u));
+  min-width: calc(1 * var(--u)); padding: 0 calc(.2 * var(--u)); border-radius: 99px;
+  background: var(--ticket); color: #2B1B00; border: 1px solid #000; font-style: normal; font-size: calc(.62 * var(--u)); line-height: 1.5;
+}
+.bag-seat:focus-visible, .mini-ticket:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.bag-body { overflow: auto; min-height: calc(14 * var(--u)); padding: calc(.5 * var(--u)) calc(.3 * var(--u)); }
+.bag-summary { margin: 0 0 calc(.8 * var(--u)); font-size: calc(1.1 * var(--u)); color: var(--text-2); }
+.bag-summary strong { color: var(--gold); font-size: calc(1.4 * var(--u)); }
+.bag-summary b { color: var(--text); font-size: calc(1.3 * var(--u)); }
+.bag-empty { text-align: center; color: var(--text-2); font-size: calc(1.1 * var(--u)); margin: calc(3 * var(--u)) 0; }
+.bag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(21 * var(--u)), 1fr)); gap: calc(1 * var(--u)) calc(1.6 * var(--u)); padding: 0 calc(.6 * var(--u)); }
+
+/* 小張票券（和揭曉時的票券同一種造型） */
+.mini-ticket {
+  position: relative; display: grid; grid-template-columns: 13% 1fr; width: 100%;
+  min-height: calc(7.4 * var(--u)); padding: 0; overflow: hidden; text-align: left;
+  background: var(--ticket); color: #2B1B00; border: calc(.22 * var(--u)) solid #000; border-radius: calc(.7 * var(--u));
+  font: inherit; cursor: default;
+}
+button.mini-ticket { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+button.mini-ticket:hover { transform: translateY(-2px); box-shadow: 0 calc(.4 * var(--u)) calc(1.2 * var(--u)) rgba(0, 0, 0, .45); }
+.mini-ticket::before, .mini-ticket::after {
+  content: ""; position: absolute; top: 50%; width: calc(1.8 * var(--u)); height: calc(1.8 * var(--u)); margin-top: calc(-.9 * var(--u));
+  border-radius: 50%; background: var(--panel); border: calc(.22 * var(--u)) solid #000;
+}
+.mini-ticket::before { left: calc(-1.1 * var(--u)); }
+.mini-ticket::after { right: calc(-1.1 * var(--u)); }
+.mt-barcode {
+  margin: 22% 0 22% 30%; border-right: 2px dashed #000; padding-right: 22%;
+  background: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 4px, #000 4px 5px, transparent 5px 8px);
+  background-clip: content-box;
+}
+.mt-body { display: flex; flex-direction: column; justify-content: center; padding: calc(.5 * var(--u)) calc(1.6 * var(--u)) calc(.5 * var(--u)) calc(.8 * var(--u)); min-width: 0; }
+.mt-meta { font-size: calc(.66 * var(--u)); font-weight: 800; letter-spacing: .06em; color: #6B4A12; min-height: 1.2em; }
+.mt-name { font-size: calc(1.55 * var(--u)); font-weight: 900; line-height: 1.15; word-break: break-word; }
+.mt-desc { font-size: calc(.78 * var(--u)); font-weight: 700; line-height: 1.4; margin-top: .2em; }
+.mini-ticket.used { filter: grayscale(.85); opacity: .6; }
+.mini-ticket.picked { outline: calc(.3 * var(--u)) solid var(--gold); outline-offset: calc(.2 * var(--u)); box-shadow: 0 0 calc(1.6 * var(--u)) var(--glow); }
+.bag-grid.lucky .mini-ticket { min-height: calc(6.2 * var(--u)); }
+.bag-grid.lucky .mt-name { font-size: calc(1.3 * var(--u)); }
+
+.mini-ticket.big { max-width: calc(46 * var(--u)); min-height: calc(18 * var(--u)); margin: 0 auto; border-width: calc(.35 * var(--u)); border-radius: calc(1.2 * var(--u)); }
+.mini-ticket.big::before, .mini-ticket.big::after { width: calc(3.6 * var(--u)); height: calc(3.6 * var(--u)); margin-top: calc(-1.8 * var(--u)); border-width: calc(.35 * var(--u)); }
+.mini-ticket.big::before { left: calc(-2.1 * var(--u)); }
+.mini-ticket.big::after { right: calc(-2.1 * var(--u)); }
+.mini-ticket.big .mt-body { padding: calc(1.2 * var(--u)) calc(3 * var(--u)) calc(1.2 * var(--u)) calc(1.4 * var(--u)); }
+.mini-ticket.big .mt-meta { font-size: calc(1 * var(--u)); }
+.mini-ticket.big .mt-name { font-size: calc(4 * var(--u)); }
+.mini-ticket.big .mt-desc { font-size: calc(1.4 * var(--u)); }
+.mini-ticket.big.used { filter: none; opacity: 1; }
+
+/* 「已使用」印章 */
+.stamp {
+  position: absolute; right: 8%; top: 50%; transform: translateY(-50%) rotate(-14deg);
+  padding: .1em .45em; border: .14em solid #A63D1F; border-radius: .25em; color: #A63D1F;
+  font-size: calc(1.3 * var(--u)); font-weight: 900; letter-spacing: .12em; background: rgba(243, 220, 176, .6);
+  pointer-events: none;
+}
+.mini-ticket.big .stamp { font-size: calc(3.2 * var(--u)); }
+.mini-ticket.stamping .stamp { animation: stamp .45s cubic-bezier(.2, 1.4, .4, 1) both .15s; }
+@keyframes stamp {
+  from { transform: translateY(-50%) rotate(-14deg) scale(2.6); opacity: 0; }
+  to { transform: translateY(-50%) rotate(-14deg) scale(1); opacity: 1; }
+}
+.pop-in { animation: pop .45s ease-out both .5s; max-width: calc(36 * var(--u)); margin: 0 auto; }
+
+.bag-detail { display: flex; flex-direction: column; align-items: center; gap: calc(1 * var(--u)); padding: calc(.6 * var(--u)) calc(2 * var(--u)); }
+.bag-detail > .mini-ticket { width: 100%; }
+.bag-hint { margin: 0; font-size: calc(1.15 * var(--u)); color: var(--text-2); text-align: center; }
+.bag-result { margin: 0; font-size: calc(1.3 * var(--u)); text-align: center; }
+.bag-result strong { color: var(--gold); }
+.bag-actions { display: flex; gap: calc(1 * var(--u)); justify-content: center; flex-wrap: wrap; margin-top: calc(.4 * var(--u)); }
+.bag-actions.sticky { position: sticky; bottom: 0; padding: calc(.8 * var(--u)) 0 calc(.2 * var(--u)); background: linear-gradient(transparent, var(--panel) 30%); }
+.bag-actions .btn { font-size: calc(1.1 * var(--u)); min-height: calc(2.8 * var(--u)); padding: 0 calc(1.6 * var(--u)); }
+.btn-use { background: var(--btn); color: var(--btn-text); border-color: var(--btn); font-weight: 900; }
+.btn-use:disabled { background: #3A3570; color: var(--drawn-text); border-color: var(--panel-border); cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mini-ticket.stamping .stamp, .pop-in, .bag-note { animation: none !important; opacity: 1; }
+}
+
+@media (max-width: 900px), (max-aspect-ratio: 1/1) {
+  .btn-bag { font-size: 14px; }
+  .bag-dot { font-size: 11px; min-width: 18px; height: 18px; line-height: 16px; top: -6px; right: -6px; }
+  .bag-overlay { padding: 8px; }
+  .bag-box { width: 100%; max-height: 96vh; padding: 12px; border-radius: 14px; gap: 10px; }
+  .bag-head h2 { font-size: 20px; }
+  .bag-head .btn { font-size: 15px; min-height: 40px; }
+  .bag-seat { min-width: 40px; height: 38px; font-size: 15px; }
+  .bag-seat i { font-size: 10px; top: -7px; right: -7px; min-width: 16px; }
+  .bag-summary { font-size: 14px; }
+  .bag-summary strong, .bag-summary b { font-size: 17px; }
+  .bag-empty { font-size: 15px; }
+  .bag-grid { grid-template-columns: 1fr; gap: 12px; padding: 0 14px; }
+  .mini-ticket { min-height: 84px; }
+  .mt-meta { font-size: 11px; }
+  .mt-name { font-size: 22px; }
+  .mt-desc { font-size: 13px; }
+  .mini-ticket.big { min-height: 180px; }
+  .mini-ticket.big .mt-meta { font-size: 13px; }
+  .mini-ticket.big .mt-name { font-size: 34px; }
+  .mini-ticket.big .mt-desc { font-size: 16px; }
+  .mini-ticket.big .stamp { font-size: 28px; }
+  .stamp { font-size: 16px; }
+  .bag-detail { padding: 6px 18px; gap: 12px; }
+  .bag-hint, .bag-result { font-size: 15px; }
+  .bag-actions .btn { font-size: 16px; min-height: 46px; }
+  .bag-note { font-size: 16px; }
+}

@@ -87,16 +87,19 @@
       grid.appendChild(h('p', { style: 'grid-column:1/-1;color:var(--text-2)', text: '尚未匯入名單。' }));
     }
     if (selected !== null && (data.seats.indexOf(selected) === -1 || balanceOf(selected) < 1)) selected = null;
+    var bag = data.bagCounts || {};
     data.seats.forEach(function (s) {
       var n = balanceOf(s);
+      var cards = bag[s] || 0;
       grid.appendChild(h('button', {
         type: 'button',
         class: 'seat' + (s === selected ? ' selected' : ''),
         disabled: n < 1 || phase !== 'idle',
         'aria-pressed': s === selected ? 'true' : 'false',
-        'aria-label': s + ' 號，' + n + ' 張券',
+        'aria-label': s + ' 號，' + n + ' 張券' + (cards ? '，背包 ' + cards + ' 張卡' : ''),
         onclick: function () { selected = s; renderSeats(); renderSelection(); renderDrawButton(); }
-      }, h('b', { text: String(s) }), h('small', { text: n + ' 張' })));
+      }, h('b', { text: String(s) }), h('small', { text: n + ' 張' }),
+        cards ? h('i', { class: 'bag-dot', title: '背包有 ' + cards + ' 張未使用的卡', text: String(cards) }) : null));
     });
   }
 
@@ -242,6 +245,11 @@
       LotteryFx.revealCard(stage, r, { flipMs: flipMs });
       Sfx.flip();
       setTimeout(function () { Sfx.ding(); }, flipMs * 0.6);
+      stage.appendChild(h('p', { class: 'bag-note', style: '--delay:' + flipMs + 'ms', text: '🎒 已放進 ' + r.seat + ' 號的卡片背包' }));
+      if (!r.replay) {
+        data.bagCounts = data.bagCounts || {};
+        data.bagCounts[r.seat] = (data.bagCounts[r.seat] || 0) + 1;
+      }
     }
 
     // 先在本機更新畫面資料，按「下一位」後再向後端同步
@@ -379,9 +387,31 @@
     });
   }
 
+  /* ============ 卡片背包 ============ */
+  function initBackpack() {
+    Backpack.init({
+      getSeats: function () { return data ? data.seats : []; },
+      getSelected: function () { return selected; },
+      getBagCounts: function () { return (data && data.bagCounts) || {}; },
+      isIdle: function () { return phase === 'idle' && !!data; },
+      onUsed: function (d) {
+        // 先在本機更新，關閉背包時再向後端同步
+        if (d.granted && data) data.balances[d.card.seat] = d.balance;
+        if (data) {
+          data.bagCounts = data.bagCounts || {};
+          data.bagCounts[d.card.seat] = Math.max(0, (data.bagCounts[d.card.seat] || 0) - 1 + (d.chosen ? 1 : 0));
+          renderSeats(); renderSelection(); renderDrawButton();
+        }
+      },
+      onChanged: refresh,
+      sfx: function (name) { if (typeof Sfx[name] === 'function') Sfx[name](); }
+    });
+  }
+
   /* ============ 啟動 ============ */
   LotteryFx.initStars($('stars'), reducedMQ.matches);
   initControls();
+  initBackpack();
   App.requireCode().then(function (ok) {
     if (!ok) return;
     refresh();

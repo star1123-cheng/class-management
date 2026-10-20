@@ -5,7 +5,7 @@
  * 1. 到「專案設定 → 指令碼屬性」新增兩組存取碼（值由導師自訂，不要寫在程式裡）：
  *    ACCESS_CODE  導師碼：可以使用全部功能（只輸入在導師自己的裝置）
  *    DISPLAY_CODE 教室碼：只能看投影、看抽籤頁與執行「抽」（輸入在班級電腦）
- * 2. 執行 setup() 建立工作表。
+ * 2. 執行 setup() 建立工作表（舊版升級時可不重跑：第一次抽到卡片或打開背包時，會自動建立「卡片背包」）。
  * 3. 部署為網頁應用程式（執行身分：我；存取權：任何人），安全性靠存取碼。
  *
  * 所有 API 一律用 POST，body 為 JSON 字串：{ action, code, ...參數 }
@@ -19,7 +19,8 @@ var SHEET = {
   TICKETS: '抽籤券',
   POOL: '籤池',
   CARDS: '卡片',
-  DRAWS: '抽籤紀錄'
+  DRAWS: '抽籤紀錄',
+  BAG: '卡片背包'
 };
 
 var HEADERS = {};
@@ -30,6 +31,7 @@ HEADERS[SHEET.TICKETS] = ['座號', '異動', '原因', '時間'];
 HEADERS[SHEET.POOL] = ['號碼', '類型', '實物名稱', '已抽', '抽出座號', '抽出時間'];
 HEADERS[SHEET.CARDS] = ['卡名', '說明', '權重', '啟用'];
 HEADERS[SHEET.DRAWS] = ['請求ID', '時間', '座號', '號碼', '類型', '結果名稱', '結果說明'];
+HEADERS[SHEET.BAG] = ['卡片ID', '座號', '卡名', '說明', '來源', '取得時間', '狀態', '使用時間', '連動ID'];
 
 // 這些欄位設為「純文字」格式，避免試算表自動把日期、時間字串轉成日期物件
 var TEXT_COLUMNS = {};
@@ -39,12 +41,22 @@ TEXT_COLUMNS[SHEET.MISSING] = ['作業ID', '更新時間'];
 TEXT_COLUMNS[SHEET.TICKETS] = ['時間'];
 TEXT_COLUMNS[SHEET.POOL] = ['實物名稱', '抽出時間'];
 TEXT_COLUMNS[SHEET.DRAWS] = ['請求ID', '時間'];
+TEXT_COLUMNS[SHEET.BAG] = ['卡片ID', '取得時間', '使用時間', '連動ID'];
 
 var POOL_SIZE = 40;
 var PRIZE_NUMBERS = [7, 13, 20, 21, 34];
 var PRIZE_NAME = '小文具小玩具';
 var MAX_BOARD = 5;
 var LOCK_WAIT_MS = 10000;
+
+// 有自動效果的卡片（依卡名辨識；在試算表改了卡名，自動效果就會失效）
+var CARD_REDRAW = '再抽一次';  // 使用後自動送 1 張抽籤券
+var CARD_LUCKY = '幸運女神';   // 使用後從啟用中的卡片挑一張放進背包
+
+// 卡片背包的狀態
+var BAG_UNUSED = '未使用';
+var BAG_USED = '已使用';
+var BAG_REVOKED = '已收回';    // 幸運女神被復原時，挑到的那張卡改成這個狀態
 
 var DEFAULT_CARDS = [
   ['我是DJ', '下課或用餐時間可以點 1 首歌。', 1.5],
@@ -86,16 +98,10 @@ function setup() {
   var report = [];
 
   Object.keys(HEADERS).forEach(function (name) {
+    if (name === SHEET.BAG) return; // 卡片背包要從抽籤紀錄補登，放到最後處理
     var sheet = ss.getSheetByName(name);
     if (!sheet) {
-      sheet = ss.insertSheet(name);
-      var header = HEADERS[name];
-      sheet.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight('bold');
-      sheet.setFrozenRows(1);
-      (TEXT_COLUMNS[name] || []).forEach(function (col) {
-        var c = header.indexOf(col) + 1;
-        sheet.getRange(2, c, Math.max(sheet.getMaxRows() - 1, 1), 1).setNumberFormat('@');
-      });
+      sheet = createSheet_(ss, name);
       report.push('已建立：' + name);
     } else {
       report.push('已存在，略過：' + name);
@@ -117,6 +123,12 @@ function setup() {
       report.push('已填入 ' + cardRows.length + ' 張卡片');
     }
   });
+
+  if (ss.getSheetByName(SHEET.BAG)) {
+    report.push('已存在，略過：' + SHEET.BAG);
+  } else {
+    report.push('已建立：' + SHEET.BAG + '（從抽籤紀錄補登 ' + ensureBag_().backfilled + ' 張卡片）');
+  }
 
   if (!displayCode) report.push('提醒：尚未設定教室碼 DISPLAY_CODE，班級電腦目前只能用導師碼登入。');
   console.log(report.join('\n'));
@@ -161,7 +173,7 @@ function doPost(e) {
 }
 
 // 教室碼（DISPLAY_CODE）可以呼叫的 API
-var DISPLAY_ACTIONS = ['ping', 'getBoard', 'getLottery', 'draw'];
+var DISPLAY_ACTIONS = ['ping', 'getBoard', 'getLottery', 'draw', 'getBackpack'];
 
 var ACTIONS = {
   ping: function (req) { return { serverTime: nowIso_(), role: req.role }; },
@@ -178,7 +190,11 @@ var ACTIONS = {
   getLottery: getLottery_,
   grantTickets: grantTickets_,
   draw: draw_,
-  resetPool: resetPool_
+  resetPool: resetPool_,
+  getBackpack: getBackpack_,
+  useCard: useCard_,
+  undoUseCard: undoUseCard_,
+  clearUsedCards: clearUsedCards_
 };
 
 /* ============================================================
@@ -478,6 +494,7 @@ function getLottery_(req) {
     pool: pool.map(function (p) { return { number: p.number, drawn: p.drawn }; }),
     seats: seats,
     balances: out,
+    bagCounts: bagCounts_(),
     recent: recent,
     drawnCount: drawnCount,
     remainingCount: pool.length - drawnCount,
@@ -555,7 +572,8 @@ function draw_(req) {
       description = card.description;
     }
 
-    // 5. 寫入籤池、抽籤券、抽籤紀錄
+    // 5. 寫入籤池、抽籤券、抽籤紀錄；抽到卡片時同時放進卡片背包
+    var bag = type === '抽卡' ? ensureBag_().table : null;
     var now = nowIso_();
     setFields_(poolTable, pick._row, { '已抽': '是', '抽出座號': seat, '抽出時間': now });
     appendRows_(table_(SHEET.TICKETS), [{ '座號': seat, '異動': -1, '原因': '抽籤', '時間': now }]);
@@ -563,6 +581,12 @@ function draw_(req) {
       '請求ID': requestId, '時間': now, '座號': seat, '號碼': number,
       '類型': type, '結果名稱': name, '結果說明': description
     }]);
+    if (bag) {
+      appendRows_(bag, [{
+        '卡片ID': requestId, '座號': seat, '卡名': name, '說明': description,
+        '來源': '抽籤', '取得時間': now, '狀態': BAG_UNUSED
+      }]);
+    }
 
     // 6. 回傳
     return {
@@ -590,14 +614,7 @@ function resetPool_(req) {
 
 /** 依權重從啟用的卡片中抽一張 */
 function pickCard_() {
-  var cards = table_(SHEET.CARDS).rows.map(function (r) {
-    return {
-      name: String(r['卡名'] || '').trim(),
-      description: String(r['說明'] || '').trim(),
-      weight: Number(r['權重']),
-      enabled: String(r['啟用']).trim() !== '否' && r['啟用'] !== false
-    };
-  }).filter(function (c) { return c.name && c.enabled && isFinite(c.weight) && c.weight > 0; });
+  var cards = enabledCards_();
   if (cards.length === 0) return null;
   var total = cards.reduce(function (s, c) { return s + c.weight; }, 0);
   var r = Math.random() * total;
@@ -606,6 +623,216 @@ function pickCard_() {
     if (r < 0) return cards[i];
   }
   return cards[cards.length - 1];
+}
+
+/** 「卡片」工作表中啟用、權重大於 0 的卡 */
+function enabledCards_() {
+  return table_(SHEET.CARDS).rows.map(function (r) {
+    return {
+      name: String(r['卡名'] || '').trim(),
+      description: String(r['說明'] || '').trim(),
+      weight: Number(r['權重']),
+      enabled: String(r['啟用']).trim() !== '否' && r['啟用'] !== false
+    };
+  }).filter(function (c) { return c.name && c.enabled && isFinite(c.weight) && c.weight > 0; });
+}
+
+/* ============================================================
+ * 卡片背包
+ * ============================================================ */
+
+/**
+ * 讀取卡片背包。seat 有值時只回傳該座號的卡片。
+ * 回傳 cards（未使用在前、已使用在後，各自新到舊）、counts（各座號未使用張數）、
+ * choices（幸運女神可以挑的卡片）。
+ */
+function getBackpack_(req) {
+  var hasSeat = req.seat !== undefined && req.seat !== null && req.seat !== '';
+  var seat = hasSeat ? toSeat_(req.seat) : null;
+  if (hasSeat && seat === null) throw apiError_('INVALID_INPUT');
+
+  if (!ss_().getSheetByName(SHEET.BAG)) withLock_(function () { ensureBag_(); });
+  var items = readBag_().filter(function (c) {
+    return c.status !== BAG_REVOKED && (seat === null || c.seat === seat);
+  });
+  var unused = items.filter(function (c) { return c.status === BAG_UNUSED; }).reverse();
+  var used = items.filter(function (c) { return c.status === BAG_USED; })
+    .sort(function (a, b) { return a.usedAt < b.usedAt ? 1 : -1; });
+  // 全班總覽時，已使用的卡片只回傳最近 50 張，避免資料量越來越大
+  if (seat === null) used = used.slice(0, 50);
+
+  return {
+    seat: seat,
+    cards: unused.concat(used).map(bagOut_),
+    counts: bagCounts_(),
+    choices: luckyChoices_().map(function (c) { return { name: c.name, description: c.description }; }),
+    serverTime: nowIso_()
+  };
+}
+
+/**
+ * 使用一張卡片（只有導師碼可以呼叫）。
+ * 再抽一次：自動送 1 張抽籤券。
+ * 幸運女神：需帶 choice（卡名），挑到的卡放進同一位同學的背包（未使用）。
+ */
+function useCard_(req) {
+  var cardId = cleanId_(req.cardId);
+  return withLock_(function () {
+    var bag = ensureBag_().table;
+    var row = find_(bag.rows, function (r) { return String(r['卡片ID']) === cardId; });
+    if (!row) throw apiError_('NOT_FOUND');
+    var card = bagItem_(row);
+    if (card.status !== BAG_UNUSED) throw apiError_('ALREADY_USED');
+
+    var now = nowIso_();
+    var result = { card: null, granted: 0, balance: null, chosen: null };
+    var fields = { '狀態': BAG_USED, '使用時間': now };
+
+    if (card.name === CARD_REDRAW) {
+      if (!isActiveSeat_(card.seat)) throw apiError_('NOT_FOUND');
+      appendRows_(table_(SHEET.TICKETS), [{ '座號': card.seat, '異動': 1, '原因': CARD_REDRAW, '時間': now }]);
+      result.granted = 1;
+      result.balance = balances_()[card.seat] || 0;
+    } else if (card.name === CARD_LUCKY) {
+      // 後端再檢查一次：只能挑啟用中、而且不是幸運女神的卡
+      var choiceName = typeof req.choice === 'string' ? req.choice.trim() : '';
+      var choice = find_(luckyChoices_(), function (c) { return c.name === choiceName; });
+      if (!choice) throw apiError_('INVALID_INPUT');
+      var chosen = {
+        id: 'L' + newId_(), seat: card.seat, name: choice.name, description: choice.description,
+        source: CARD_LUCKY, gotAt: now, status: BAG_UNUSED, usedAt: ''
+      };
+      appendRows_(bag, [{
+        '卡片ID': chosen.id, '座號': chosen.seat, '卡名': chosen.name, '說明': chosen.description,
+        '來源': chosen.source, '取得時間': now, '狀態': BAG_UNUSED
+      }]);
+      fields['連動ID'] = chosen.id;
+      result.chosen = chosen;
+    }
+
+    setFields_(bag, row._row, fields);
+    card.status = BAG_USED;
+    card.usedAt = now;
+    result.card = bagOut_(card);
+    return result;
+  });
+}
+
+/**
+ * 復原誤按的「使用」（只有導師碼可以呼叫）。
+ * 再抽一次：收回送出的券（券已經拿去抽就不能復原）。
+ * 幸運女神：收回挑到的卡（那張卡已經用掉就不能復原）。
+ */
+function undoUseCard_(req) {
+  var cardId = cleanId_(req.cardId);
+  return withLock_(function () {
+    var bag = ensureBag_().table;
+    var row = find_(bag.rows, function (r) { return String(r['卡片ID']) === cardId; });
+    if (!row) throw apiError_('NOT_FOUND');
+    var card = bagItem_(row);
+    if (card.status !== BAG_USED) throw apiError_('NOT_USED');
+
+    var now = nowIso_();
+    if (card.name === CARD_REDRAW) {
+      if ((balances_()[card.seat] || 0) < 1) throw apiError_('CANNOT_UNDO');
+      appendRows_(table_(SHEET.TICKETS), [{ '座號': card.seat, '異動': -1, '原因': CARD_REDRAW + '（復原）', '時間': now }]);
+    } else if (card.name === CARD_LUCKY && card.linkId) {
+      var linked = find_(bag.rows, function (r) { return String(r['卡片ID']) === card.linkId; });
+      if (linked) {
+        if (bagItem_(linked).status !== BAG_UNUSED) throw apiError_('CANNOT_UNDO');
+        setFields_(bag, linked._row, { '狀態': BAG_REVOKED, '使用時間': now });
+      }
+    }
+
+    setFields_(bag, row._row, { '狀態': BAG_UNUSED, '使用時間': '', '連動ID': '' });
+    card.status = BAG_UNUSED;
+    card.usedAt = '';
+    return { card: bagOut_(card), balance: balances_()[card.seat] || 0 };
+  });
+}
+
+/**
+ * 學期末清理：刪除「已使用」與「已收回」的卡片（只有導師碼可以呼叫）。
+ * 未使用的卡片保留；confirm 必須是字串「清除」。
+ */
+function clearUsedCards_(req) {
+  if (req.confirm !== '清除') throw apiError_('INVALID_INPUT');
+  return withLock_(function () {
+    var bag = ensureBag_().table;
+    var rowNums = bag.rows.filter(function (r) {
+      var st = String(r['狀態']).trim();
+      return st === BAG_USED || st === BAG_REVOKED;
+    }).map(function (r) { return r._row; }).sort(function (a, b) { return b - a; });
+    // 由下往上刪，前面的列號才不會跑掉
+    rowNums.forEach(function (n) { bag.sheet.deleteRow(n); });
+    return { removed: rowNums.length };
+  });
+}
+
+/**
+ * 確保「卡片背包」工作表存在；第一次建立時，從「抽籤紀錄」補登過去抽到的卡片（一律為未使用）。
+ * 會建立工作表，呼叫端必須已經持有鎖，或在 setup() 中執行。
+ */
+function ensureBag_() {
+  var ss = ss_();
+  var backfilled = 0;
+  if (!ss.getSheetByName(SHEET.BAG)) {
+    createSheet_(ss, SHEET.BAG);
+    if (ss.getSheetByName(SHEET.DRAWS)) {
+      var seen = {};
+      var rows = table_(SHEET.DRAWS).rows.filter(function (r) {
+        var id = String(r['請求ID'] || '');
+        if (String(r['類型']).trim() !== '抽卡' || !id || seen[id]) return false;
+        seen[id] = true;
+        return true;
+      }).map(function (r) {
+        return {
+          '卡片ID': String(r['請求ID']), '座號': toInt_(r['座號']), '卡名': String(r['結果名稱']),
+          '說明': String(r['結果說明'] || ''), '來源': '補登', '取得時間': String(r['時間']), '狀態': BAG_UNUSED
+        };
+      });
+      appendRows_(table_(SHEET.BAG), rows);
+      backfilled = rows.length;
+    }
+  }
+  return { table: table_(SHEET.BAG), backfilled: backfilled };
+}
+
+function readBag_() {
+  if (!ss_().getSheetByName(SHEET.BAG)) return [];
+  return table_(SHEET.BAG).rows.map(bagItem_).filter(function (c) { return c.id && c.seat !== null; });
+}
+
+function bagItem_(r) {
+  return {
+    id: String(r['卡片ID'] || ''),
+    seat: toInt_(r['座號']),
+    name: String(r['卡名'] || ''),
+    description: String(r['說明'] || ''),
+    source: String(r['來源'] || ''),
+    gotAt: String(r['取得時間'] || ''),
+    status: String(r['狀態'] || '').trim() || BAG_UNUSED,
+    usedAt: String(r['使用時間'] || ''),
+    linkId: String(r['連動ID'] || '')
+  };
+}
+
+function bagOut_(c) {
+  return { id: c.id, seat: c.seat, name: c.name, description: c.description, source: c.source, gotAt: c.gotAt, status: c.status, usedAt: c.usedAt };
+}
+
+/** 各座號未使用的卡片張數；背包工作表還沒建立時回傳空物件 */
+function bagCounts_() {
+  var counts = {};
+  readBag_().forEach(function (c) {
+    if (c.status === BAG_UNUSED) counts[c.seat] = (counts[c.seat] || 0) + 1;
+  });
+  return counts;
+}
+
+/** 幸運女神可以挑的卡片：啟用中，且不含幸運女神自己（避免無限循環） */
+function luckyChoices_() {
+  return enabledCards_().filter(function (c) { return c.name !== CARD_LUCKY; });
 }
 
 /* ============================================================
@@ -687,6 +914,19 @@ function balances_() {
 
 function ss_() {
   return SpreadsheetApp.getActiveSpreadsheet();
+}
+
+/** 建立工作表、寫入標題列，並把需要的欄位設成純文字格式 */
+function createSheet_(ss, name) {
+  var sheet = ss.insertSheet(name);
+  var header = HEADERS[name];
+  sheet.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  (TEXT_COLUMNS[name] || []).forEach(function (col) {
+    var c = header.indexOf(col) + 1;
+    sheet.getRange(2, c, Math.max(sheet.getMaxRows() - 1, 1), 1).setNumberFormat('@');
+  });
+  return sheet;
 }
 
 /** 讀取整張工作表，回傳 { sheet, header, idx, rows }，rows 為物件且含 _row（實際列號） */

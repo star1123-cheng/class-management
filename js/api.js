@@ -16,6 +16,10 @@
     LOCKED_TIMEOUT: '系統忙碌中，請稍後再試一次。',
     NO_TICKET: '這位同學沒有抽籤券了。',
     POOL_EMPTY: '籤池已全部抽完。',
+    ALREADY_USED: '這張卡已經使用過了。',
+    NOT_USED: '這張卡還沒有使用，不需要復原。',
+    CANNOT_UNDO: '無法復原：這張卡送出的抽籤券或挑到的卡片已經用掉了。',
+    CANCELLED: '已取消。',
     SERVER_ERROR: '伺服器發生錯誤，請稍後再試。',
     NETWORK: '網路連線失敗，請檢查網路後再試一次。',
     NO_CONFIG: '尚未設定 GAS 網址，請先編輯 config.js 的 GAS_URL。',
@@ -188,24 +192,32 @@
    * 存取碼輸入視窗
    * opts.teacherOnly：這一頁需要導師碼（記錄頁、設定頁），輸入教室碼會被拒絕
    * opts.remember：「記住在這台裝置」預設是否勾選
+   * opts.noStore：只回傳輸入的存取碼，不存到瀏覽器（用於單次的導師操作）
+   * opts.cancelable：顯示「取消」按鈕，按下後回傳 null
    */
   function codeGate(message, opts) {
     if (gateOpen) return gateOpen;
     opts = opts || {};
     gateOpen = new Promise(function (resolve) {
+      function close(value) {
+        wrap.remove();
+        gateOpen = null;
+        resolve(value);
+      }
       var input = h('input', { type: 'password', class: 'input', placeholder: opts.teacherOnly ? '導師碼' : '導師碼或教室碼', autocomplete: 'current-password', 'aria-label': '存取碼' });
       var remember = h('input', { type: 'checkbox' });
       remember.checked = opts.remember !== false;
       var err = h('p', { class: 'gate-error', role: 'alert' });
       var btn = h('button', { type: 'submit', class: 'btn btn-primary', text: '確認' });
-      var links = opts.teacherOnly ? h('p', { class: 'gate-links' },
+      var links = opts.teacherOnly && !opts.noStore ? h('p', { class: 'gate-links' },
         '只要投影或抽籤？前往 ', h('a', { href: 'board.html', text: '投影頁' }), '、', h('a', { href: 'lottery.html', text: '抽籤頁' })) : null;
+      var cancel = opts.cancelable ? h('button', { type: 'button', class: 'btn gate-cancel', text: '取消', onclick: function () { close(null); } }) : null;
       var form = h('form', { class: 'gate-box' },
         h('h2', { text: opts.teacherOnly ? '請輸入導師碼' : '請輸入存取碼' }),
         h('p', { class: 'gate-hint', text: message || '導師的裝置輸入「導師碼」；班級電腦輸入「教室碼」。' }),
         input,
-        h('label', { class: 'gate-remember' }, remember, ' 記住在這台裝置（班級電腦輸入導師碼時請不要勾選）'),
-        err, btn, links);
+        opts.noStore ? null : h('label', { class: 'gate-remember' }, remember, ' 記住在這台裝置（班級電腦輸入導師碼時請不要勾選）'),
+        err, btn, cancel, links);
       var wrap = h('div', { class: 'gate', role: 'dialog', 'aria-modal': 'true' }, form);
       form.addEventListener('submit', async function (e) {
         e.preventDefault();
@@ -222,10 +234,8 @@
             btn.textContent = '確認';
             return;
           }
-          setCode(code, remember.checked);
-          wrap.remove();
-          gateOpen = null;
-          resolve(code);
+          if (!opts.noStore) setCode(code, remember.checked);
+          close(code);
         } catch (ex) {
           err.textContent = errorText(ex);
           btn.disabled = false;
@@ -267,6 +277,33 @@
     return false;
   }
 
+  /**
+   * 呼叫只有導師碼能用的 API（例如使用卡片）。
+   * 這台裝置是教室碼時，跳出導師碼視窗；導師碼只放在記憶體 3 分鐘，
+   * 不存進瀏覽器，重新整理或關閉分頁就消失。使用者按「取消」時丟出 CANCELLED。
+   */
+  var TEACHER_TEMP_MS = 3 * 60 * 1000;
+  var teacherTemp = null;
+  async function teacherApi(action, params) {
+    if (teacherTemp && Date.now() < teacherTemp.until) {
+      try {
+        return await api(action, params, { code: teacherTemp.code });
+      } catch (e) {
+        if (e.code !== 'UNAUTHORIZED') throw e;
+        teacherTemp = null; // 導師碼已變更，重新詢問
+      }
+    }
+    try {
+      return await api(action, params);
+    } catch (e) {
+      if (e.code !== 'FORBIDDEN') throw e;
+    }
+    var code = await codeGate('這個動作需要導師碼。導師碼只用在接下來 3 分鐘，不會留在這台電腦上。', { teacherOnly: true, noStore: true, cancelable: true });
+    if (!code) throw new ApiError('CANCELLED');
+    teacherTemp = { code: code, until: Date.now() + TEACHER_TEMP_MS };
+    return api(action, params, { code: code });
+  }
+
   function toggleFullscreen() {
     var d = document;
     if (!d.fullscreenElement && !d.webkitFullscreenElement) {
@@ -279,6 +316,7 @@
 
   window.App = {
     api: api,
+    teacherApi: teacherApi,
     ApiError: ApiError,
     ERROR_TEXT: ERROR_TEXT,
     errorText: errorText,

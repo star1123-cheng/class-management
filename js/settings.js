@@ -1,10 +1,10 @@
-/* 設定頁：存取碼、名單匯入、在籍狀態、發券、籤池、抽籤紀錄 */
+/* 設定頁：存取碼、名單匯入、在籍狀態、發券、籤池、卡片背包、抽籤紀錄 */
 (function () {
   'use strict';
   var h = App.h;
   var $ = function (id) { return document.getElementById(id); };
 
-  var state = { roster: [], lottery: null, preview: null, amount: 1, busy: false };
+  var state = { roster: [], lottery: null, bag: null, preview: null, amount: 1, busy: false };
 
   /* ============ 存取碼 ============ */
   function setStatus(el, msg, ok) {
@@ -68,12 +68,14 @@
   async function loadAll() {
     if (!App.getCode()) return;
     try {
-      var results = await Promise.all([App.api('getState'), App.api('getLottery', { limit: 20 })]);
+      var results = await Promise.all([App.api('getState'), App.api('getLottery', { limit: 20 }), loadBagData()]);
       state.roster = results[0].roster;
       state.lottery = results[1];
+      state.bag = results[2];
       renderRoster();
       renderTickets();
       renderPool();
+      renderBag();
       renderDraws();
     } catch (e) {
       if (e.code === 'UNAUTHORIZED' || e.code === 'FORBIDDEN') {
@@ -353,6 +355,137 @@
       loadAll();
     } catch (e) {
       setStatus($('poolStatus'), '重設失敗：' + App.errorText(e), false);
+      this.disabled = false;
+    }
+  });
+
+  /* ============ 卡片背包 ============ */
+  var CARD_LUCKY = '幸運女神';
+
+  function loadBagData() {
+    var seat = $('bagSeat').value;
+    return App.api('getBackpack', seat ? { seat: Number(seat) } : {});
+  }
+
+  async function reloadBag() {
+    try {
+      state.bag = await loadBagData();
+      renderBag();
+    } catch (e) {
+      setStatus($('bagStatus'), '讀取背包失敗：' + App.errorText(e), false);
+    }
+  }
+
+  function renderBag() {
+    var bag = state.bag;
+    if (!bag) return;
+
+    // 座號選單：全班＋各座號（附未使用張數）
+    var sel = $('bagSeat');
+    var prev = sel.value;
+    App.clear(sel);
+    sel.appendChild(h('option', { value: '', text: '全班' }));
+    state.lottery.seats.forEach(function (s) {
+      var n = bag.counts[s] || 0;
+      sel.appendChild(h('option', { value: String(s), text: s + ' 號' + (n ? '（' + n + ' 張未使用）' : '') }));
+    });
+    sel.value = prev;
+
+    var unused = bag.cards.filter(function (c) { return c.status === '未使用'; })
+      .sort(function (a, b) { return a.seat - b.seat || (a.gotAt < b.gotAt ? -1 : 1); });
+    var used = bag.cards.filter(function (c) { return c.status === '已使用'; });
+    $('bagUnusedCount').textContent = unused.length;
+
+    var ub = $('bagUnusedBody');
+    App.clear(ub);
+    if (!unused.length) ub.appendChild(h('tr', {}, h('td', { colspan: '4', class: 'muted', text: '沒有未使用的卡片。' })));
+    unused.forEach(function (c) {
+      var cell = h('td', {});
+      cell.appendChild(h('button', { type: 'button', class: 'btn btn-small', text: '使用', onclick: function () { startUse(c, cell); } }));
+      ub.appendChild(h('tr', {},
+        h('td', { text: c.seat + ' 號' }),
+        h('td', { title: c.description, text: c.name }),
+        h('td', { text: App.fmtMD(c.gotAt) + (c.source === CARD_LUCKY ? '（幸運女神）' : '') }),
+        cell));
+    });
+
+    var bb = $('bagUsedBody');
+    App.clear(bb);
+    if (!used.length) bb.appendChild(h('tr', {}, h('td', { colspan: '4', class: 'muted', text: '還沒有使用過的卡片。' })));
+    used.forEach(function (c) {
+      bb.appendChild(h('tr', {},
+        h('td', { text: App.fmtMD(c.usedAt) + ' ' + App.fmtHM(c.usedAt) }),
+        h('td', { text: c.seat + ' 號' }),
+        h('td', { text: c.name }),
+        h('td', {}, h('button', { type: 'button', class: 'btn btn-small', text: '復原', onclick: function () { undoUse(c, this); } }))));
+    });
+  }
+
+  $('bagSeat').addEventListener('change', reloadBag);
+
+  /** 按「使用」：幸運女神先在同一格顯示選卡選單 */
+  function startUse(card, cell) {
+    if (card.name !== CARD_LUCKY) { useCard(card, null, cell.querySelector('button')); return; }
+    App.clear(cell);
+    var pick = h('select', { class: 'input', 'aria-label': '幸運女神要選的卡片', style: 'min-height:36px;width:auto' },
+      h('option', { value: '', text: '選一張卡…' }));
+    state.bag.choices.forEach(function (c) { pick.appendChild(h('option', { value: c.name, text: c.name })); });
+    var ok = h('button', { type: 'button', class: 'btn btn-small btn-primary', text: '確定', onclick: function () {
+      if (!pick.value) { App.toast('請先選一張卡。', 'error'); return; }
+      useCard(card, pick.value, ok);
+    } });
+    cell.appendChild(h('div', { class: 'row' }, pick, ok,
+      h('button', { type: 'button', class: 'btn btn-small', text: '取消', onclick: renderBag })));
+  }
+
+  async function useCard(card, choice, btn) {
+    var msg = choice
+      ? '要使用 ' + card.seat + ' 號的「幸運女神」，並把「' + choice + '」放進背包嗎？'
+      : '要使用 ' + card.seat + ' 號的「' + card.name + '」嗎？' + (card.name === '再抽一次' ? '\n（會自動送 1 張抽籤券）' : '');
+    if (!confirm(msg)) return;
+    if (btn) btn.disabled = true;
+    try {
+      var d = await App.api('useCard', { cardId: card.id, choice: choice || undefined });
+      var text = card.seat + ' 號已使用「' + card.name + '」';
+      if (d.granted) text += '，已送 1 張券（目前 ' + d.balance + ' 張）';
+      if (d.chosen) text += '，「' + d.chosen.name + '」已放進背包';
+      setStatus($('bagStatus'), text + '。', true);
+      loadAll();
+    } catch (e) {
+      setStatus($('bagStatus'), '使用失敗：' + App.errorText(e), false);
+      if (btn) btn.disabled = false;
+      if (e.code === 'ALREADY_USED') reloadBag();
+    }
+  }
+
+  async function undoUse(card, btn) {
+    var extra = card.name === '再抽一次' ? '\n（會收回送出的 1 張券）' : card.name === CARD_LUCKY ? '\n（會收回當時選的那張卡）' : '';
+    if (!confirm('要復原 ' + card.seat + ' 號的「' + card.name + '」，改回未使用嗎？' + extra)) return;
+    btn.disabled = true;
+    try {
+      await App.api('undoUseCard', { cardId: card.id });
+      setStatus($('bagStatus'), card.seat + ' 號的「' + card.name + '」已改回未使用。', true);
+      loadAll();
+    } catch (e) {
+      setStatus($('bagStatus'), '復原失敗：' + App.errorText(e), false);
+      btn.disabled = false;
+    }
+  }
+
+  $('bagClearInput').addEventListener('input', function () {
+    $('btnBagClear').disabled = this.value.trim() !== '清除';
+  });
+  $('btnBagClear').addEventListener('click', async function () {
+    if ($('bagClearInput').value.trim() !== '清除') return;
+    if (!confirm('確定要刪除所有「已使用」的卡片紀錄嗎？這個動作無法復原。')) return;
+    this.disabled = true;
+    try {
+      var d = await App.api('clearUsedCards', { confirm: '清除' });
+      $('bagClearInput').value = '';
+      setStatus($('bagStatus'), '已清除 ' + d.removed + ' 筆已使用的卡片紀錄。', true);
+      reloadBag();
+    } catch (e) {
+      setStatus($('bagStatus'), '清除失敗：' + App.errorText(e), false);
       this.disabled = false;
     }
   });

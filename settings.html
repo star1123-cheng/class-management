@@ -14,7 +14,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="application-name" content="班級管理">
   <title>系統設定</title>
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=2">
 </head>
 <body>
   <div class="page wide">
@@ -119,7 +119,40 @@
       <p id="poolStatus" class="status-line"></p>
     </section>
 
-    <!-- 5. 抽籤紀錄 -->
+    <!-- 5. 卡片背包 -->
+    <section class="card" id="secBag">
+      <h2>卡片背包</h2>
+      <p class="muted">學生抽到的卡片會自動放進背包。「再抽一次」使用後自動送 1 張券；「幸運女神」使用時要選一張卡放進背包。按錯可以按「復原」。</p>
+      <label class="field">查看
+        <select id="bagSeat" class="input"><option value="">全班</option></select>
+      </label>
+
+      <h3>未使用（<span id="bagUnusedCount">0</span> 張）</h3>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>座號</th><th>卡片</th><th>取得</th><th>操作</th></tr></thead>
+          <tbody id="bagUnusedBody"></tbody>
+        </table>
+      </div>
+
+      <h3>已使用</h3>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>使用時間</th><th>座號</th><th>卡片</th><th>操作</th></tr></thead>
+          <tbody id="bagUsedBody"></tbody>
+        </table>
+      </div>
+      <p id="bagStatus" class="status-line"></p>
+
+      <h3>學期末清理</h3>
+      <p class="muted">刪除所有「已使用」的卡片紀錄，未使用的卡片會保留。學生畢業時，請到試算表直接刪除「卡片背包」工作表的資料列。</p>
+      <label class="field">要清除，請輸入「清除」兩個字
+        <input id="bagClearInput" class="input" type="text" autocomplete="off" placeholder="清除">
+      </label>
+      <button id="btnBagClear" class="btn btn-danger" type="button" disabled>清除已使用的卡片</button>
+    </section>
+
+    <!-- 6. 抽籤紀錄 -->
     <section class="card" id="secDraws">
       <h2>抽籤紀錄（最近 20 筆）</h2>
       <div class="table-wrap">
@@ -131,9 +164,11 @@
     </section>
   </div>
 
-  <script src="config.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/pwa.js"></script>
-  <script src="js/settings.js"></script>
+  <script src="config.js?v=2"></script>
+  <script src="js/api.js?v=2"></script>
+  <script src="js/pwa.js?v=2"></script>
+  <script src="js/settings.js?v=2"></script>
+  <!-- 著作權浮水印 -->
+  <script src="js/watermark.js?v=2" defer></script>
 </body>
 </html>
