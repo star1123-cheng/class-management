@@ -61,6 +61,11 @@ var CARD_LUCKY = '幸運女神';   // 使用後從啟用中的卡片挑一張放
 var BAG_UNUSED = '未使用';
 var BAG_USED = '已使用';
 var BAG_REVOKED = '已收回';    // 幸運女神被復原時，挑到的那張卡改成這個狀態
+var BAG_RECYCLED = '已回收';   // 學生拿去回收換券的卡（同一次回收的卡，連動ID 相同）
+
+// 回收換券：幾張未使用的卡換 1 張抽籤券
+var RECYCLE_COUNT = 3;
+var RECYCLE_REASON = '回收卡片';
 
 var DEFAULT_CARDS = [
   ['我是DJ', '下課或用餐時間可以點 1 首歌。', 1.5],
@@ -198,6 +203,8 @@ var ACTIONS = {
   getBackpack: getBackpack_,
   useCard: useCard_,
   undoUseCard: undoUseCard_,
+  recycleCards: recycleCards_,
+  undoRecycle: undoRecycle_,
   clearUsedCards: clearUsedCards_
 };
 
@@ -665,7 +672,7 @@ function getBackpack_(req) {
     return c.status !== BAG_REVOKED && (seat === null || c.seat === seat);
   });
   var unused = items.filter(function (c) { return c.status === BAG_UNUSED; }).reverse();
-  var used = items.filter(function (c) { return c.status === BAG_USED; })
+  var used = items.filter(function (c) { return c.status === BAG_USED || c.status === BAG_RECYCLED; })
     .sort(function (a, b) { return a.usedAt < b.usedAt ? 1 : -1; });
   // 全班總覽時，已使用的卡片只回傳最近 50 張，避免資料量越來越大
   if (seat === null) used = used.slice(0, 50);
@@ -761,7 +768,79 @@ function undoUseCard_(req) {
 }
 
 /**
- * 學期末清理：刪除「已使用」與「已收回」的卡片（只有導師碼可以呼叫）。
+ * 回收換券（只有導師碼可以呼叫）：同一位同學剛好 3 張未使用的卡，換 1 張抽籤券。
+ * 卡名可以相同，但同一張卡（同一個卡片ID）不能重複算。
+ * 3 張卡改成「已回收」並寫上同一個回收ID（放在連動ID 欄），復原時用它找回這 3 張。
+ */
+function recycleCards_(req) {
+  if (!Array.isArray(req.cardIds) || req.cardIds.length !== RECYCLE_COUNT) throw apiError_('INVALID_INPUT');
+  var ids = req.cardIds.map(cleanId_);
+  var seen = {};
+  ids.forEach(function (id) {
+    if (seen[id]) throw apiError_('INVALID_INPUT');
+    seen[id] = true;
+  });
+
+  return withLock_(function () {
+    var bag = ensureBag_().table;
+    var rows = ids.map(function (id) {
+      var row = find_(bag.rows, function (r) { return String(r['卡片ID']) === id; });
+      if (!row) throw apiError_('NOT_FOUND');
+      if (bagItem_(row).status !== BAG_UNUSED) throw apiError_('ALREADY_USED');
+      return row;
+    });
+    var seat = bagItem_(rows[0]).seat;
+    if (rows.some(function (r) { return bagItem_(r).seat !== seat; })) throw apiError_('INVALID_INPUT');
+    if (!isActiveSeat_(seat)) throw apiError_('NOT_FOUND');
+
+    var now = nowIso_();
+    var recycleId = 'R' + newId_();
+    rows.forEach(function (r) {
+      setFields_(bag, r._row, { '狀態': BAG_RECYCLED, '使用時間': now, '連動ID': recycleId });
+    });
+    appendRows_(table_(SHEET.TICKETS), [{ '座號': seat, '異動': 1, '原因': RECYCLE_REASON, '時間': now }]);
+
+    return {
+      seat: seat,
+      recycleId: recycleId,
+      cards: rows.map(function (r) {
+        var c = bagItem_(r);
+        c.status = BAG_RECYCLED;
+        c.usedAt = now;
+        c.linkId = recycleId;
+        return bagOut_(c);
+      }),
+      granted: 1,
+      balance: balances_()[seat] || 0
+    };
+  });
+}
+
+/**
+ * 復原回收（只有導師碼可以呼叫）：收回換到的 1 張券，這次回收的卡全部改回未使用。
+ * 券已經拿去抽就不能復原。
+ */
+function undoRecycle_(req) {
+  var recycleId = cleanId_(req.recycleId);
+  return withLock_(function () {
+    var bag = ensureBag_().table;
+    var rows = bag.rows.filter(function (r) {
+      return String(r['連動ID']) === recycleId && bagItem_(r).status === BAG_RECYCLED;
+    });
+    if (!rows.length) throw apiError_('NOT_FOUND');
+    var seat = bagItem_(rows[0]).seat;
+    if ((balances_()[seat] || 0) < 1) throw apiError_('CANNOT_UNDO');
+
+    appendRows_(table_(SHEET.TICKETS), [{ '座號': seat, '異動': -1, '原因': RECYCLE_REASON + '（復原）', '時間': nowIso_() }]);
+    rows.forEach(function (r) {
+      setFields_(bag, r._row, { '狀態': BAG_UNUSED, '使用時間': '', '連動ID': '' });
+    });
+    return { seat: seat, restored: rows.length, balance: balances_()[seat] || 0 };
+  });
+}
+
+/**
+ * 學期末清理：刪除「已使用」「已回收」與「已收回」的卡片（只有導師碼可以呼叫）。
  * 未使用的卡片保留；confirm 必須是字串「清除」。
  */
 function clearUsedCards_(req) {
@@ -770,7 +849,7 @@ function clearUsedCards_(req) {
     var bag = ensureBag_().table;
     var rowNums = bag.rows.filter(function (r) {
       var st = String(r['狀態']).trim();
-      return st === BAG_USED || st === BAG_REVOKED;
+      return st === BAG_USED || st === BAG_RECYCLED || st === BAG_REVOKED;
     }).map(function (r) { return r._row; }).sort(function (a, b) { return b - a; });
     // 由下往上刪，前面的列號才不會跑掉
     rowNums.forEach(function (n) { bag.sheet.deleteRow(n); });
@@ -827,7 +906,10 @@ function bagItem_(r) {
 }
 
 function bagOut_(c) {
-  return { id: c.id, seat: c.seat, name: c.name, description: c.description, source: c.source, gotAt: c.gotAt, status: c.status, usedAt: c.usedAt };
+  return {
+    id: c.id, seat: c.seat, name: c.name, description: c.description, source: c.source, gotAt: c.gotAt, status: c.status, usedAt: c.usedAt,
+    recycleId: c.status === BAG_RECYCLED ? c.linkId : ''
+  };
 }
 
 /** 各座號未使用的卡片張數；背包工作表還沒建立時回傳空物件 */

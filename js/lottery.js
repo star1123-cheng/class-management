@@ -403,6 +403,14 @@
           renderSeats(); renderSelection(); renderDrawButton();
         }
       },
+      onRecycled: function (d) {
+        // 回收換券：券數改成後端回傳的餘額，未使用卡片數扣掉回收的張數
+        if (!data) return;
+        data.balances[d.seat] = d.balance;
+        data.bagCounts = data.bagCounts || {};
+        data.bagCounts[d.seat] = Math.max(0, (data.bagCounts[d.seat] || 0) - d.cards.length);
+        renderSeats(); renderSelection(); renderDrawButton();
+      },
       onChanged: refresh,
       sfx: function (name) { if (typeof Sfx[name] === 'function') Sfx[name](); }
     });

@@ -508,6 +508,8 @@ button, input { font: inherit; color: inherit; }
   gap: calc(1.2 * var(--u)) calc(1 * var(--u)); padding: calc(.3 * var(--u)) calc(.4 * var(--u));
 }
 .bag-grid.lucky { --cw: calc(10.5 * var(--u)); }
+/* 回收成功畫面：3 張卡橫排置中，不要擠成一欄 */
+.bag-grid.recycled { display: flex; flex-wrap: wrap; justify-content: center; }
 
 /* 背包裡的卡牌（和揭曉時同一種造型） */
 .tcard.mini { --cw: calc(12.5 * var(--u)); }
@@ -543,6 +545,9 @@ button.tcard:hover .tc-shine { animation: shine .9s ease-in-out both; }
 .bag-actions .btn { font-size: calc(1.1 * var(--u)); min-height: calc(2.8 * var(--u)); padding: 0 calc(1.6 * var(--u)); }
 .btn-use { background: var(--btn); color: var(--btn-text); border-color: var(--btn); font-weight: 900; }
 .btn-use:disabled { background: #3A3570; color: var(--drawn-text); border-color: var(--panel-border); cursor: not-allowed; }
+.btn-recycle { border-color: #6FDC8C; color: #6FDC8C; }
+.btn-recycle:disabled { border-color: var(--panel-border); color: var(--drawn-text); cursor: not-allowed; }
+.bag-actions .bag-hint { align-self: center; font-size: calc(1 * var(--u)); }
 
 @media (prefers-reduced-motion: reduce) {
   .tcard.stamping .stamp, .pop-in, .bag-note { animation: none !important; opacity: 1; }
