@@ -14,7 +14,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="application-name" content="班級管理">
   <title>系統設定</title>
-  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
   <div class="page wide">
@@ -122,7 +122,7 @@
     <!-- 5. 卡片背包 -->
     <section class="card" id="secBag">
       <h2>卡片背包</h2>
-      <p class="muted">學生抽到的卡片會自動放進背包。「再抽一次」使用後自動送 1 張券；「幸運女神」使用時要選一張卡放進背包。按錯可以按「復原」。</p>
+      <p class="muted">學生抽到的卡片會自動放進背包。「再抽一次」使用後自動送 1 張券；「幸運女神」使用時要選一張卡放進背包。學生可以在抽籤頁的背包把 3 張未使用的卡（卡名可以相同）回收換 1 張券，需要導師碼。按錯可以按「復原」。</p>
       <label class="field">查看
         <select id="bagSeat" class="input"><option value="">全班</option></select>
       </label>
@@ -145,7 +145,7 @@
       <p id="bagStatus" class="status-line"></p>
 
       <h3>學期末清理</h3>
-      <p class="muted">刪除所有「已使用」的卡片紀錄，未使用的卡片會保留。學生畢業時，請到試算表直接刪除「卡片背包」工作表的資料列。</p>
+      <p class="muted">刪除所有「已使用」與「已回收」的卡片紀錄，未使用的卡片會保留。學生畢業時，請到試算表直接刪除「卡片背包」工作表的資料列。</p>
       <label class="field">要清除，請輸入「清除」兩個字
         <input id="bagClearInput" class="input" type="text" autocomplete="off" placeholder="清除">
       </label>
@@ -164,11 +164,11 @@
     </section>
   </div>
 
-  <script src="config.js?v=5"></script>
-  <script src="js/api.js?v=5"></script>
-  <script src="js/pwa.js?v=5"></script>
-  <script src="js/settings.js?v=5"></script>
+  <script src="config.js?v=6"></script>
+  <script src="js/api.js?v=6"></script>
+  <script src="js/pwa.js?v=6"></script>
+  <script src="js/settings.js?v=6"></script>
   <!-- 著作權浮水印 -->
-  <script src="js/watermark.js?v=5" defer></script>
+  <script src="js/watermark.js?v=6" defer></script>
 </body>
 </html>

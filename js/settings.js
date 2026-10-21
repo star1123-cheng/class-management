@@ -361,6 +361,7 @@
 
   /* ============ 卡片背包 ============ */
   var CARD_LUCKY = '幸運女神';
+  var RECYCLED = '已回收';
 
   function loadBagData() {
     var seat = $('bagSeat').value;
@@ -393,7 +394,7 @@
 
     var unused = bag.cards.filter(function (c) { return c.status === '未使用'; })
       .sort(function (a, b) { return a.seat - b.seat || (a.gotAt < b.gotAt ? -1 : 1); });
-    var used = bag.cards.filter(function (c) { return c.status === '已使用'; });
+    var used = bag.cards.filter(function (c) { return c.status === '已使用' || c.status === RECYCLED; });
     $('bagUnusedCount').textContent = unused.length;
 
     var ub = $('bagUnusedBody');
@@ -413,11 +414,13 @@
     App.clear(bb);
     if (!used.length) bb.appendChild(h('tr', {}, h('td', { colspan: '4', class: 'muted', text: '還沒有使用過的卡片。' })));
     used.forEach(function (c) {
+      var recycled = c.status === RECYCLED;
       bb.appendChild(h('tr', {},
         h('td', { text: App.fmtMD(c.usedAt) + ' ' + App.fmtHM(c.usedAt) }),
         h('td', { text: c.seat + ' 號' }),
-        h('td', { text: c.name }),
-        h('td', {}, h('button', { type: 'button', class: 'btn btn-small', text: '復原', onclick: function () { undoUse(c, this); } }))));
+        h('td', { text: c.name + (recycled ? '（已回收）' : '') }),
+        h('td', {}, h('button', { type: 'button', class: 'btn btn-small', text: '復原',
+          onclick: function () { recycled ? undoRecycle(c, this) : undoUse(c, this); } }))));
     });
   }
 
@@ -472,12 +475,30 @@
     }
   }
 
+  /** 復原回收：同一次回收的卡一起改回未使用，並收回換到的 1 張券 */
+  async function undoRecycle(card, btn) {
+    var group = state.bag.cards.filter(function (c) { return c.recycleId && c.recycleId === card.recycleId; });
+    var names = group.map(function (c) { return '「' + c.name + '」'; }).join('、') || '「' + card.name + '」';
+    if (!confirm('要復原 ' + card.seat + ' 號這次的回收嗎？\n' + names + ' 會一起改回未使用，並收回換到的 1 張券。')) return;
+    btn.disabled = true;
+    try {
+      var d = await App.api('undoRecycle', { recycleId: card.recycleId });
+      setStatus($('bagStatus'), card.seat + ' 號回收的 ' + d.restored + ' 張卡已改回未使用，收回 1 張券（目前 ' + d.balance + ' 張）。', true);
+      loadAll();
+    } catch (e) {
+      var text = e.code === 'CANNOT_UNDO' ? '換到的抽籤券已經拿去抽了。' : App.errorText(e);
+      setStatus($('bagStatus'), '復原失敗：' + text, false);
+      btn.disabled = false;
+      if (e.code === 'NOT_FOUND') reloadBag();
+    }
+  }
+
   $('bagClearInput').addEventListener('input', function () {
     $('btnBagClear').disabled = this.value.trim() !== '清除';
   });
   $('btnBagClear').addEventListener('click', async function () {
     if ($('bagClearInput').value.trim() !== '清除') return;
-    if (!confirm('確定要刪除所有「已使用」的卡片紀錄嗎？這個動作無法復原。')) return;
+    if (!confirm('確定要刪除所有「已使用」與「已回收」的卡片紀錄嗎？這個動作無法復原。')) return;
     this.disabled = true;
     try {
       var d = await App.api('clearUsedCards', { confirm: '清除' });

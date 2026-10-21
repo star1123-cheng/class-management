@@ -3,6 +3,7 @@
  * 打開背包 → 選座號 → 看卡片 → 點卡片放大 → 「使用這張卡」（需要導師碼）。
  * 再抽一次：使用後自動送 1 張抽籤券。
  * 幸運女神：使用前先從其他卡片挑一張，挑到的卡放進同一位同學的背包。
+ * 回收換券：勾選 3 張未使用的卡（卡名可以相同）→ 換 1 張抽籤券（需要導師碼）。
  * 「復原」只在設定頁提供（導師專用）。
  */
 (function () {
@@ -12,8 +13,10 @@
 
   var CARD_REDRAW = '再抽一次';
   var CARD_LUCKY = '幸運女神';
+  var RECYCLED = '已回收';
+  var RECYCLE_COUNT = 3;  // 和後端 RECYCLE_COUNT 一致
 
-  var hooks = null;   // 由 lottery.js 提供：getSeats、getSelected、getBagCounts、isIdle、onUsed、onChanged、sfx
+  var hooks = null;   // 由 lottery.js 提供：getSeats、getSelected、getBagCounts、isIdle、onUsed、onRecycled、onChanged、sfx
   var st = { seat: null, cards: [], choices: [], counts: {}, busy: false, loadSeq: 0 };
 
   function init(opts) {
@@ -95,9 +98,11 @@
   /** 收藏卡牌造型的卡片（和揭曉時同一種）；opts.big 放大顯示、opts.onclick 可點擊 */
   function ticket(card, opts) {
     opts = opts || {};
-    var used = card.status === '已使用';
+    var recycled = card.status === RECYCLED;
+    var used = card.status === '已使用' || recycled;
+    var mark = recycled ? '已回收' : '已使用';
     var meta = opts.meta !== undefined ? opts.meta
-      : used ? App.fmtMD(card.usedAt) + ' 使用'
+      : used ? App.fmtMD(card.usedAt) + (recycled ? ' 回收' : ' 使用')
       : card.gotAt ? App.fmtMD(card.gotAt) + ' 取得' : '';
     var from = !used && card.source === CARD_LUCKY ? '🍀 幸運女神' : '';
     return LotteryFx.cardEl(card, {
@@ -108,9 +113,9 @@
         type: opts.onclick ? 'button' : null,
         class: 'mini' + (opts.big ? ' big' : '') + (used ? ' used' : '') + (opts.cls ? ' ' + opts.cls : ''),
         onclick: opts.onclick || null,
-        'aria-label': card.name + (used ? '，已使用' : '')
+        'aria-label': card.name + (used ? '，' + mark : '')
       },
-      extra: used ? h('span', { class: 'stamp', 'aria-hidden': 'true', text: '已使用' }) : null
+      extra: used ? h('span', { class: 'stamp', 'aria-hidden': 'true', text: mark }) : null
     });
   }
 
@@ -119,14 +124,23 @@
     App.clear(body);
     var unused = st.cards.filter(function (c) { return c.status === '未使用'; });
     var used = st.cards.filter(function (c) { return c.status === '已使用'; });
+    var recycled = st.cards.filter(function (c) { return c.status === RECYCLED; });
     body.appendChild(h('p', { class: 'bag-summary' },
-      h('strong', { text: st.seat + ' 號' }), '　未使用 ', h('b', { text: String(unused.length) }), ' 張　・　已使用 ' + used.length + ' 張'));
+      h('strong', { text: st.seat + ' 號' }), '　未使用 ', h('b', { text: String(unused.length) }), ' 張　・　已使用 ' + used.length + ' 張'
+        + (recycled.length ? '　・　已回收 ' + recycled.length + ' 張' : '')));
     if (!st.cards.length) {
       body.appendChild(h('p', { class: 'bag-empty', text: '背包還是空的，抽到卡片後會自動放進來。' }));
       return;
     }
+    var canRecycle = unused.length >= RECYCLE_COUNT;
+    body.appendChild(h('div', { class: 'bag-actions' },
+      h('button', { type: 'button', class: 'btn btn-recycle', disabled: !canRecycle, onclick: renderRecycle,
+        text: '♻️ 回收 ' + RECYCLE_COUNT + ' 張換 1 張抽籤券' }),
+      canRecycle ? null : h('span', { class: 'bag-hint', text: '（未使用的卡滿 ' + RECYCLE_COUNT + ' 張才能回收）' })));
+    // 已使用與已回收混在一起，依時間新到舊（後端已排好）
+    var done = st.cards.filter(function (c) { return c.status !== '未使用'; });
     var grid = h('div', { class: 'bag-grid' });
-    unused.concat(used).forEach(function (c) {
+    unused.concat(done).forEach(function (c) {
       grid.appendChild(ticket(c, { onclick: function () { renderDetail(c); } }));
     });
     body.appendChild(grid);
@@ -135,8 +149,9 @@
   function renderDetail(card) {
     var body = $('bagBody');
     App.clear(body);
-    var used = card.status === '已使用';
-    var hint = used ? '這張卡在 ' + App.fmtMD(card.usedAt) + ' ' + App.fmtHM(card.usedAt) + ' 使用過了。'
+    var used = card.status !== '未使用';
+    var hint = card.status === RECYCLED ? '這張卡在 ' + App.fmtMD(card.usedAt) + ' ' + App.fmtHM(card.usedAt) + ' 回收換券了。'
+      : used ? '這張卡在 ' + App.fmtMD(card.usedAt) + ' ' + App.fmtHM(card.usedAt) + ' 使用過了。'
       : card.name === CARD_REDRAW ? '使用後會自動送 ' + card.seat + ' 號 1 張抽籤券。'
       : card.name === CARD_LUCKY ? '使用時可以從其他卡片中挑一張，放進 ' + card.seat + ' 號的背包。'
       : '使用後請老師現場執行卡片內容。';
@@ -222,6 +237,79 @@
     body.appendChild(h('div', { class: 'bag-detail' }, t, info,
       h('div', { class: 'bag-actions' }, h('button', { type: 'button', class: 'btn btn-use', text: '回到背包', onclick: function () { load(); } }))));
     if (hooks.sfx) hooks.sfx(d.granted || d.chosen ? 'fanfare' : 'ding');
+  }
+
+  /* ============ 回收換券 ============ */
+  /** 勾選要回收的卡：剛好 3 張才能確認；同名的卡可以一起選 */
+  function renderRecycle() {
+    var body = $('bagBody');
+    App.clear(body);
+    var unused = st.cards.filter(function (c) { return c.status === '未使用'; });
+    var picked = [];
+    var counter = h('b', { text: '0' });
+    var confirmBtn = h('button', { type: 'button', class: 'btn btn-use', text: '確定回收', disabled: true,
+      onclick: function () { if (picked.length === RECYCLE_COUNT) recycle(picked, this); } });
+    var grid = h('div', { class: 'bag-grid' });
+    unused.forEach(function (c) {
+      var el = ticket(c, {
+        onclick: function () {
+          var i = picked.indexOf(c);
+          if (i !== -1) picked.splice(i, 1);
+          else if (picked.length < RECYCLE_COUNT) picked.push(c);
+          else { App.toast('最多選 ' + RECYCLE_COUNT + ' 張，請先取消其中一張。', 'error'); return; }
+          el.classList.toggle('picked', i === -1);
+          el.setAttribute('aria-pressed', i === -1 ? 'true' : 'false');
+          counter.textContent = String(picked.length);
+          confirmBtn.disabled = picked.length !== RECYCLE_COUNT;
+        }
+      });
+      el.setAttribute('aria-pressed', 'false');
+      grid.appendChild(el);
+    });
+    body.appendChild(h('p', { class: 'bag-summary' }, '♻️ 請 ', h('strong', { text: st.seat + ' 號' }),
+      ' 選 ' + RECYCLE_COUNT + ' 張不要的卡，換 1 張抽籤券　已選 ', counter, ' / ' + RECYCLE_COUNT));
+    body.appendChild(grid);
+    body.appendChild(h('div', { class: 'bag-actions sticky' },
+      h('button', { type: 'button', class: 'btn', text: '← 返回', onclick: renderList }),
+      confirmBtn));
+  }
+
+  async function recycle(cards, btn) {
+    if (st.busy) return;
+    var names = cards.map(function (c) { return '「' + c.name + '」'; }).join('、');
+    if (!confirm('要回收 ' + cards[0].seat + ' 號的 ' + names + '，換 1 張抽籤券嗎？')) return;
+    st.busy = true;
+    btn.disabled = true;
+    btn.textContent = '處理中…';
+    try {
+      var d = await App.teacherApi('recycleCards', { cardIds: cards.map(function (c) { return c.id; }) });
+      st.busy = false;
+      st.counts[d.seat] = Math.max(0, (st.counts[d.seat] || 0) - d.cards.length);
+      renderSeats();
+      renderRecycled(d);
+      hooks.onRecycled(d);
+    } catch (e) {
+      st.busy = false;
+      btn.textContent = '確定回收';
+      if (e.code === 'CANCELLED') { btn.disabled = false; return; }
+      App.toast(App.errorText(e), 'error');
+      if (e.code === 'ALREADY_USED' || e.code === 'NOT_FOUND') { load(); return; }
+      btn.disabled = false;
+    }
+  }
+
+  /** 回收成功：3 張卡蓋上「已回收」印章，並顯示目前的券數 */
+  function renderRecycled(d) {
+    var body = $('bagBody');
+    App.clear(body);
+    var grid = h('div', { class: 'bag-grid recycled' });
+    d.cards.forEach(function (c) { grid.appendChild(ticket(c, { cls: 'stamping' })); });
+    body.appendChild(h('div', { class: 'bag-detail' },
+      h('p', { class: 'bag-result' }, '♻️ 已回收 ' + d.cards.length + ' 張，送 ', h('strong', { text: d.seat + ' 號' }),
+        ' 1 張抽籤券，目前 ', h('strong', { text: String(d.balance) }), ' 張'),
+      grid,
+      h('div', { class: 'bag-actions' }, h('button', { type: 'button', class: 'btn btn-use', text: '回到背包', onclick: function () { load(); } }))));
+    if (hooks.sfx) hooks.sfx('fanfare');
   }
 
   window.Backpack = { init: init, open: open, isOpen: isOpen };
