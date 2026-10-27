@@ -70,6 +70,7 @@ var RECYCLE_REASON = '回收卡片';
 // 抽到的實物也放進卡片背包（來源寫「實物」，用來辨識）；實物不能回收換券
 var BAG_SOURCE_PRIZE = '實物';
 var PRIZE_DESCRIPTION = '實物獎品，請找老師領取。（不能回收換券）';
+var PRIZE_BACKFILL_KEY = 'PRIZE_BACKFILLED';   // 指令碼屬性：補登過以前的實物就記下時間，避免重複補登
 
 var DEFAULT_CARDS = [
   ['我是DJ', '下課或用餐時間可以點 1 首歌。', 1.5],
@@ -146,6 +147,34 @@ function setup() {
   if (!displayCode) report.push('提醒：尚未設定教室碼 DISPLAY_CODE，班級電腦目前只能用導師碼登入。');
   console.log(report.join('\n'));
   return report.join('\n');
+}
+
+/**
+ * 補登以前抽到的實物（只需要執行一次，在 Apps Script 編輯器手動執行）。
+ * 實物放進背包是 2026-10-27 才加的功能，在那之前抽到的實物只記在「抽籤紀錄」。
+ * 從「抽籤紀錄」找出類型為「實物」、背包裡還沒有的抽籤，一律補成未使用（未領取）。
+ * 卡片ID 沿用抽籤的請求ID；執行過一次就記下來，再按一次不會重複補登。
+ */
+function backfillPrizes() {
+  var props = PropertiesService.getScriptProperties();
+  var done = props.getProperty(PRIZE_BACKFILL_KEY);
+  if (done) {
+    var skip = '已經在 ' + done + ' 補登過，這次沒有變動。';
+    console.log(skip);
+    return skip;
+  }
+  var added = withLock_(function () {
+    var bag = ensureBag_().table;
+    var have = {};
+    bag.rows.forEach(function (r) { have[String(r['卡片ID'])] = true; });
+    var rows = prizeDrawsToBag_(function (id) { return !have[id]; });
+    appendRows_(bag, rows);
+    return rows.length;
+  });
+  props.setProperty(PRIZE_BACKFILL_KEY, nowIso_());
+  var msg = '已補登 ' + added + ' 個以前抽到的實物（未領取）。';
+  console.log(msg);
+  return msg;
 }
 
 /* ============================================================
@@ -882,12 +911,29 @@ function ensureBag_() {
           '卡片ID': String(r['請求ID']), '座號': toInt_(r['座號']), '卡名': String(r['結果名稱']),
           '說明': String(r['結果說明'] || ''), '來源': '補登', '取得時間': String(r['時間']), '狀態': BAG_UNUSED
         };
-      });
+      }).concat(prizeDrawsToBag_(function () { return true; }));
       appendRows_(table_(SHEET.BAG), rows);
       backfilled = rows.length;
     }
   }
   return { table: table_(SHEET.BAG), backfilled: backfilled };
+}
+
+/** 「抽籤紀錄」中的實物轉成背包資料列（未使用）；keep(id) 回傳 false 的略過 */
+function prizeDrawsToBag_(keep) {
+  if (!ss_().getSheetByName(SHEET.DRAWS)) return [];
+  var seen = {};
+  return table_(SHEET.DRAWS).rows.filter(function (r) {
+    var id = String(r['請求ID'] || '');
+    if (String(r['類型']).trim() !== '實物' || !id || seen[id] || toInt_(r['座號']) === null || !keep(id)) return false;
+    seen[id] = true;
+    return true;
+  }).map(function (r) {
+    return {
+      '卡片ID': String(r['請求ID']), '座號': toInt_(r['座號']), '卡名': String(r['結果名稱']) || PRIZE_NAME,
+      '說明': PRIZE_DESCRIPTION, '來源': BAG_SOURCE_PRIZE, '取得時間': String(r['時間']), '狀態': BAG_UNUSED
+    };
+  });
 }
 
 function readBag_() {
