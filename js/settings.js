@@ -362,6 +362,7 @@
   /* ============ 卡片背包 ============ */
   var CARD_LUCKY = '幸運女神';
   var RECYCLED = '已回收';
+  var PRIZE = '實物';   // 和後端 BAG_SOURCE_PRIZE 一致
 
   function loadBagData() {
     var seat = $('bagSeat').value;
@@ -406,7 +407,7 @@
       ub.appendChild(h('tr', {},
         h('td', { text: c.seat + ' 號' }),
         h('td', { title: c.description, text: c.name }),
-        h('td', { text: App.fmtMD(c.gotAt) + (c.source === CARD_LUCKY ? '（幸運女神）' : '') }),
+        h('td', { text: App.fmtMD(c.gotAt) + (c.source === CARD_LUCKY ? '（幸運女神）' : c.source === PRIZE ? '（實物）' : '') }),
         cell));
     });
 
@@ -418,7 +419,7 @@
       bb.appendChild(h('tr', {},
         h('td', { text: App.fmtMD(c.usedAt) + ' ' + App.fmtHM(c.usedAt) }),
         h('td', { text: c.seat + ' 號' }),
-        h('td', { text: c.name + (recycled ? '（已回收）' : '') }),
+        h('td', { text: c.name + (recycled ? '（已回收）' : c.source === PRIZE ? '（已領取）' : '') }),
         h('td', {}, h('button', { type: 'button', class: 'btn btn-small', text: '復原',
           onclick: function () { recycled ? undoRecycle(c, this) : undoUse(c, this); } }))));
     });
