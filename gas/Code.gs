@@ -67,6 +67,10 @@ var BAG_RECYCLED = '已回收';   // 學生拿去回收換券的卡（同一次�
 var RECYCLE_COUNT = 3;
 var RECYCLE_REASON = '回收卡片';
 
+// 抽到的實物也放進卡片背包（來源寫「實物」，用來辨識）；實物不能回收換券
+var BAG_SOURCE_PRIZE = '實物';
+var PRIZE_DESCRIPTION = '實物獎品，請找老師領取。（不能回收換券）';
+
 var DEFAULT_CARDS = [
   ['我是DJ', '下課或用餐時間可以點 1 首歌。', 1.5],
   ['導演', '用餐時間可以選一部影片。', 1.5],
@@ -588,8 +592,8 @@ function draw_(req) {
       description = card.description;
     }
 
-    // 5. 寫入籤池、抽籤券、抽籤紀錄；抽到卡片時同時放進卡片背包
-    var bag = type === '抽卡' ? ensureBag_().table : null;
+    // 5. 寫入籤池、抽籤券、抽籤紀錄；抽到卡片或實物都放進卡片背包
+    var bag = ensureBag_().table;
     var now = nowIso_();
     setFields_(poolTable, pick._row, { '已抽': '是', '抽出座號': seat, '抽出時間': now });
     appendRows_(table_(SHEET.TICKETS), [{ '座號': seat, '異動': -1, '原因': '抽籤', '時間': now }]);
@@ -597,12 +601,11 @@ function draw_(req) {
       '請求ID': requestId, '時間': now, '座號': seat, '號碼': number,
       '類型': type, '結果名稱': name, '結果說明': description
     }]);
-    if (bag) {
-      appendRows_(bag, [{
-        '卡片ID': requestId, '座號': seat, '卡名': name, '說明': description,
-        '來源': '抽籤', '取得時間': now, '狀態': BAG_UNUSED
-      }]);
-    }
+    var prize = type === '實物';
+    appendRows_(bag, [{
+      '卡片ID': requestId, '座號': seat, '卡名': name, '說明': prize ? PRIZE_DESCRIPTION : description,
+      '來源': prize ? BAG_SOURCE_PRIZE : '抽籤', '取得時間': now, '狀態': BAG_UNUSED
+    }]);
 
     // 6. 回傳
     return {
@@ -769,7 +772,7 @@ function undoUseCard_(req) {
 
 /**
  * 回收換券（只有導師碼可以呼叫）：同一位同學剛好 3 張未使用的卡，換 1 張抽籤券。
- * 卡名可以相同，但同一張卡（同一個卡片ID）不能重複算。
+ * 卡名可以相同，但同一張卡（同一個卡片ID）不能重複算；實物不能回收。
  * 3 張卡改成「已回收」並寫上同一個回收ID（放在連動ID 欄），復原時用它找回這 3 張。
  */
 function recycleCards_(req) {
@@ -787,6 +790,7 @@ function recycleCards_(req) {
       var row = find_(bag.rows, function (r) { return String(r['卡片ID']) === id; });
       if (!row) throw apiError_('NOT_FOUND');
       if (bagItem_(row).status !== BAG_UNUSED) throw apiError_('ALREADY_USED');
+      if (bagItem_(row).source === BAG_SOURCE_PRIZE) throw apiError_('NOT_RECYCLABLE');
       return row;
     });
     var seat = bagItem_(rows[0]).seat;
