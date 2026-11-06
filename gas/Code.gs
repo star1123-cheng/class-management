@@ -62,6 +62,18 @@ var BAG_UNUSED = '未使用';
 var BAG_USED = '已使用';
 var BAG_REVOKED = '已收回';    // 幸運女神被復原時，挑到的那張卡改成這個狀態
 var BAG_RECYCLED = '已回收';   // 學生拿去回收換券的卡（同一次回收的卡，連動ID 相同）
+var BAG_TRANSFERRED = '已轉出'; // 送給別人或拿去交換的卡（連動ID 是轉送ID；對方收到的新卡，卡片ID 是「轉送ID-序號」）
+
+// 老師派卡
+var BAG_SOURCE_TEACHER = '老師派發';
+var GRANT_MAX_SEATS = 99;
+var CARD_NAME_MAX = 20;
+var CARD_DESC_MAX = 60;
+
+// 學生之間贈送／交換：一次每人最多送出幾張；來源寫「3號贈送」「3號交換」
+var TRANSFER_MAX = 5;
+var TRANSFER_GIFT = '贈送';
+var TRANSFER_TRADE = '交換';
 
 // 回收換券：幾張未使用的卡換 1 張抽籤券
 var RECYCLE_COUNT = 3;
@@ -238,6 +250,9 @@ var ACTIONS = {
   undoUseCard: undoUseCard_,
   recycleCards: recycleCards_,
   undoRecycle: undoRecycle_,
+  grantCard: grantCard_,
+  transferCards: transferCards_,
+  undoTransfer: undoTransfer_,
   clearUsedCards: clearUsedCards_
 };
 
@@ -675,6 +690,10 @@ function pickCard_() {
 
 /** 「卡片」工作表中啟用、權重大於 0 的卡 */
 function enabledCards_() {
+  return cardRows_().filter(function (c) { return c.name && c.enabled && isFinite(c.weight) && c.weight > 0; });
+}
+
+function cardRows_() {
   return table_(SHEET.CARDS).rows.map(function (r) {
     return {
       name: String(r['卡名'] || '').trim(),
@@ -682,7 +701,17 @@ function enabledCards_() {
       weight: Number(r['權重']),
       enabled: String(r['啟用']).trim() !== '否' && r['啟用'] !== false
     };
-  }).filter(function (c) { return c.name && c.enabled && isFinite(c.weight) && c.weight > 0; });
+  });
+}
+
+/** 「卡片」工作表中有卡名的全部卡，含暫停抽出的（同名只取第一張），給老師派卡用 */
+function allCards_() {
+  var seen = {};
+  return cardRows_().filter(function (c) {
+    if (!c.name || seen[c.name]) return false;
+    seen[c.name] = true;
+    return true;
+  });
 }
 
 /* ============================================================
@@ -704,7 +733,7 @@ function getBackpack_(req) {
     return c.status !== BAG_REVOKED && (seat === null || c.seat === seat);
   });
   var unused = items.filter(function (c) { return c.status === BAG_UNUSED; }).reverse();
-  var used = items.filter(function (c) { return c.status === BAG_USED || c.status === BAG_RECYCLED; })
+  var used = items.filter(function (c) { return c.status === BAG_USED || c.status === BAG_RECYCLED || c.status === BAG_TRANSFERRED; })
     .sort(function (a, b) { return a.usedAt < b.usedAt ? 1 : -1; });
   // 全班總覽時，已使用的卡片只回傳最近 50 張，避免資料量越來越大
   if (seat === null) used = used.slice(0, 50);
@@ -714,6 +743,8 @@ function getBackpack_(req) {
     cards: unused.concat(used).map(bagOut_),
     counts: bagCounts_(),
     choices: luckyChoices_().map(function (c) { return { name: c.name, description: c.description }; }),
+    // 老師派卡可以選的卡：「卡片」工作表的全部卡（含暫停抽出的）
+    catalog: allCards_().map(function (c) { return { name: c.name, description: c.description, enabled: c.enabled }; }),
     serverTime: nowIso_()
   };
 }
@@ -873,7 +904,138 @@ function undoRecycle_(req) {
 }
 
 /**
- * 學期末清理：刪除「已使用」「已回收」與「已收回」的卡片（只有導師碼可以呼叫）。
+ * 老師派卡（只有導師碼可以呼叫）：同一張卡發給一位或多位同學，每人 1 張，來源寫「老師派發」。
+ * name：卡名（可以是「卡片」工作表的卡，也可以自訂）。
+ * description：沒帶時，若卡名在「卡片」工作表裡就用表上的說明，否則留空。
+ * 卡名是「再抽一次」「幸運女神」時，使用後的自動效果照常運作。
+ */
+function grantCard_(req) {
+  if (!Array.isArray(req.seats) || req.seats.length === 0 || req.seats.length > GRANT_MAX_SEATS) throw apiError_('INVALID_INPUT');
+  var seen = {};
+  var seats = req.seats.map(function (v) {
+    var s = toSeat_(v);
+    if (s === null || seen[s]) throw apiError_('INVALID_INPUT');
+    seen[s] = true;
+    return s;
+  });
+  var name = cleanText_(req.name, 1, CARD_NAME_MAX);
+  var hasDesc = req.description !== undefined && req.description !== null;
+  var desc = hasDesc ? cleanText_(req.description, 0, CARD_DESC_MAX) : null;
+
+  return withLock_(function () {
+    var active = {};
+    readRoster_().forEach(function (r) { if (r.active) active[r.seat] = true; });
+    seats.forEach(function (s) { if (!active[s]) throw apiError_('NOT_FOUND'); });
+    if (desc === null) {
+      var known = find_(allCards_(), function (c) { return c.name === name; });
+      desc = known ? known.description : '';
+    }
+
+    var bag = ensureBag_().table;
+    var now = nowIso_();
+    var cards = seats.map(function (s) {
+      return { id: 'G' + newId_(), seat: s, name: name, description: desc, source: BAG_SOURCE_TEACHER, gotAt: now, status: BAG_UNUSED, usedAt: '', linkId: '' };
+    });
+    appendRows_(bag, cards.map(function (c) {
+      return { '卡片ID': c.id, '座號': c.seat, '卡名': c.name, '說明': c.description, '來源': c.source, '取得時間': now, '狀態': BAG_UNUSED };
+    }));
+    return { cards: cards.map(bagOut_), counts: bagCounts_() };
+  });
+}
+
+/**
+ * 學生之間贈送或交換卡片（只有導師碼可以呼叫）。
+ * giveIds：送出的卡（同一位同學、未使用、不是實物），1 到 TRANSFER_MAX 張。
+ * toSeat：收到的同學。
+ * receiveIds：換回來的卡（toSeat 的卡，規則同上）；沒帶或空陣列就是「贈送」，有帶就是「交換」。
+ * 原本的卡改成「已轉出」並寫上轉送ID（連動ID 欄）；對方背包新增一張同名的卡，
+ * 卡片ID 是「轉送ID-序號」，來源寫「3號贈送」或「3號交換」。復原時用轉送ID 找回兩邊的卡。
+ */
+function transferCards_(req) {
+  var toSeat = toSeat_(req.toSeat);
+  if (toSeat === null) throw apiError_('INVALID_INPUT');
+  var giveIds = cleanIdList_(req.giveIds, 1, TRANSFER_MAX);
+  var receiveIds = req.receiveIds === undefined || req.receiveIds === null ? [] : cleanIdList_(req.receiveIds, 0, TRANSFER_MAX);
+  receiveIds.forEach(function (id) { if (giveIds.indexOf(id) !== -1) throw apiError_('INVALID_INPUT'); });
+
+  return withLock_(function () {
+    var bag = ensureBag_().table;
+    function pickRows(ids) {
+      return ids.map(function (id) {
+        var row = find_(bag.rows, function (r) { return String(r['卡片ID']) === id; });
+        if (!row) throw apiError_('NOT_FOUND');
+        var c = bagItem_(row);
+        if (c.status !== BAG_UNUSED) throw apiError_('ALREADY_USED');
+        if (c.source === BAG_SOURCE_PRIZE) throw apiError_('NOT_TRANSFERABLE');
+        return row;
+      });
+    }
+    var giveRows = pickRows(giveIds);
+    var receiveRows = pickRows(receiveIds);
+    var fromSeat = bagItem_(giveRows[0]).seat;
+    if (fromSeat === toSeat) throw apiError_('INVALID_INPUT');
+    if (giveRows.some(function (r) { return bagItem_(r).seat !== fromSeat; })) throw apiError_('INVALID_INPUT');
+    if (receiveRows.some(function (r) { return bagItem_(r).seat !== toSeat; })) throw apiError_('INVALID_INPUT');
+    if (!isActiveSeat_(fromSeat) || !isActiveSeat_(toSeat)) throw apiError_('NOT_FOUND');
+
+    var now = nowIso_();
+    var transferId = 'T' + newId_();
+    var kind = receiveRows.length ? TRANSFER_TRADE : TRANSFER_GIFT;
+    var seq = 0;
+    function moveTo(rows, ownerSeat, fromLabelSeat) {
+      return rows.map(function (r) {
+        var c = bagItem_(r);
+        setFields_(bag, r._row, { '狀態': BAG_TRANSFERRED, '使用時間': now, '連動ID': transferId });
+        return {
+          id: transferId + '-' + (seq++), seat: ownerSeat, name: c.name, description: c.description,
+          source: fromLabelSeat + '號' + kind, gotAt: now, status: BAG_UNUSED, usedAt: '', linkId: ''
+        };
+      });
+    }
+    var given = moveTo(giveRows, toSeat, fromSeat);
+    var received = moveTo(receiveRows, fromSeat, toSeat);
+    appendRows_(bag, given.concat(received).map(function (c) {
+      return { '卡片ID': c.id, '座號': c.seat, '卡名': c.name, '說明': c.description, '來源': c.source, '取得時間': now, '狀態': BAG_UNUSED };
+    }));
+
+    return {
+      transferId: transferId,
+      kind: kind,
+      fromSeat: fromSeat,
+      toSeat: toSeat,
+      given: given.map(bagOut_),
+      received: received.map(bagOut_),
+      counts: bagCounts_()
+    };
+  });
+}
+
+/**
+ * 復原贈送／交換（只有導師碼可以呼叫）：兩邊收到的卡改成「已收回」，原本的卡改回未使用。
+ * 收到的卡只要有一張已經用掉、回收或再轉出，就不能復原。
+ */
+function undoTransfer_(req) {
+  var transferId = cleanId_(req.transferId);
+  if (transferId.charAt(0) !== 'T') throw apiError_('INVALID_INPUT');
+  return withLock_(function () {
+    var bag = ensureBag_().table;
+    var originals = bag.rows.filter(function (r) {
+      return String(r['連動ID']) === transferId && bagItem_(r).status === BAG_TRANSFERRED;
+    });
+    if (!originals.length) throw apiError_('NOT_FOUND');
+    var prefix = transferId + '-';
+    var copies = bag.rows.filter(function (r) { return String(r['卡片ID']).indexOf(prefix) === 0; });
+    if (copies.some(function (r) { return bagItem_(r).status !== BAG_UNUSED; })) throw apiError_('CANNOT_UNDO');
+
+    var now = nowIso_();
+    copies.forEach(function (r) { setFields_(bag, r._row, { '狀態': BAG_REVOKED, '使用時間': now }); });
+    originals.forEach(function (r) { setFields_(bag, r._row, { '狀態': BAG_UNUSED, '使用時間': '', '連動ID': '' }); });
+    return { restored: originals.length, revoked: copies.length, counts: bagCounts_() };
+  });
+}
+
+/**
+ * 學期末清理：刪除「已使用」「已回收」「已轉出」與「已收回」的卡片（只有導師碼可以呼叫）。
  * 未使用的卡片保留；confirm 必須是字串「清除」。
  */
 function clearUsedCards_(req) {
@@ -882,7 +1044,7 @@ function clearUsedCards_(req) {
     var bag = ensureBag_().table;
     var rowNums = bag.rows.filter(function (r) {
       var st = String(r['狀態']).trim();
-      return st === BAG_USED || st === BAG_RECYCLED || st === BAG_REVOKED;
+      return st === BAG_USED || st === BAG_RECYCLED || st === BAG_TRANSFERRED || st === BAG_REVOKED;
     }).map(function (r) { return r._row; }).sort(function (a, b) { return b - a; });
     // 由下往上刪，前面的列號才不會跑掉
     rowNums.forEach(function (n) { bag.sheet.deleteRow(n); });
@@ -958,7 +1120,8 @@ function bagItem_(r) {
 function bagOut_(c) {
   return {
     id: c.id, seat: c.seat, name: c.name, description: c.description, source: c.source, gotAt: c.gotAt, status: c.status, usedAt: c.usedAt,
-    recycleId: c.status === BAG_RECYCLED ? c.linkId : ''
+    recycleId: c.status === BAG_RECYCLED ? c.linkId : '',
+    transferId: c.status === BAG_TRANSFERRED ? c.linkId : ''
   };
 }
 
@@ -1225,6 +1388,25 @@ function cleanDate_(v) {
 function cleanId_(v) {
   if (typeof v !== 'string' || !/^[A-Za-z0-9_-]{4,64}$/.test(v)) throw apiError_('INVALID_INPUT');
   return v;
+}
+
+/** 去頭尾空白的文字，長度要在 min 到 max 之間 */
+function cleanText_(v, min, max) {
+  var s = typeof v === 'string' ? v.trim() : '';
+  if (s.length < min || s.length > max) throw apiError_('INVALID_INPUT');
+  return s;
+}
+
+/** 卡片ID 陣列：張數在 min 到 max 之間、不可重複 */
+function cleanIdList_(v, min, max) {
+  if (!Array.isArray(v) || v.length < min || v.length > max) throw apiError_('INVALID_INPUT');
+  var seen = {};
+  return v.map(function (x) {
+    var id = cleanId_(x);
+    if (seen[id]) throw apiError_('INVALID_INPUT');
+    seen[id] = true;
+    return id;
+  });
 }
 
 function newId_() {

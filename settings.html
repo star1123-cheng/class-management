@@ -14,7 +14,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="application-name" content="班級管理">
   <title>系統設定</title>
-  <link rel="stylesheet" href="css/style.css?v=9">
+  <link rel="stylesheet" href="css/style.css?v=10">
 </head>
 <body>
   <div class="page wide">
@@ -107,6 +107,34 @@
       <div id="balanceGrid" class="mini-grid"></div>
     </section>
 
+    <!-- 3-1. 派發卡片 -->
+    <section class="card" id="secGrant">
+      <h2>派發卡片</h2>
+      <p class="muted">不用抽籤，直接把卡片放進同學的背包。可以一次勾選多位同學，每人各得 1 張。「再抽一次」「幸運女神」派出去後，使用時的自動效果照常運作。</p>
+      <label class="field">卡片
+        <select id="grantCardSel" class="input"></select>
+      </label>
+      <div id="grantCustom" class="stack" hidden>
+        <label class="field">自訂卡名（必填，最多 20 字）
+          <input id="grantName" class="input" type="text" maxlength="20" autocomplete="off" placeholder="例如：生日快樂卡">
+        </label>
+        <label class="field">說明（最多 60 字，可以空白）
+          <input id="grantDesc" class="input" type="text" maxlength="60" autocomplete="off" placeholder="例如：今天可以優先選座位。">
+        </label>
+      </div>
+      <p id="grantDescPreview" class="muted"></p>
+      <div class="row spread">
+        <span>選擇座號（已選 <b id="grantCount">0</b> 人）</span>
+        <div class="row">
+          <button id="btnGrantAll" class="btn btn-small" type="button">全選</button>
+          <button id="btnGrantNone" class="btn btn-small" type="button">清除</button>
+        </div>
+      </div>
+      <div id="grantSeats" class="mini-grid" style="margin:8px 0"></div>
+      <button id="btnGrantCard" class="btn btn-primary" type="button" disabled>派發</button>
+      <p id="grantStatus" class="status-line"></p>
+    </section>
+
     <!-- 4. 籤池 -->
     <section class="card" id="secPool">
       <h2>籤池</h2>
@@ -122,7 +150,7 @@
     <!-- 5. 卡片背包 -->
     <section class="card" id="secBag">
       <h2>卡片背包</h2>
-      <p class="muted">學生抽到的卡片會自動放進背包。「再抽一次」使用後自動送 1 張券；「幸運女神」使用時要選一張卡放進背包。學生可以在抽籤頁的背包把 3 張未使用的卡（卡名可以相同）回收換 1 張券，需要導師碼。按錯可以按「復原」。</p>
+      <p class="muted">學生抽到的卡片會自動放進背包。「再抽一次」使用後自動送 1 張券；「幸運女神」使用時要選一張卡放進背包。學生可以在抽籤頁的背包把 3 張未使用的卡（卡名可以相同）回收換 1 張券，也可以把卡送給同學或互相交換（實物不行），都需要導師碼。按錯可以按「復原」。</p>
       <label class="field">查看
         <select id="bagSeat" class="input"><option value="">全班</option></select>
       </label>
@@ -145,7 +173,7 @@
       <p id="bagStatus" class="status-line"></p>
 
       <h3>學期末清理</h3>
-      <p class="muted">刪除所有「已使用」與「已回收」的卡片紀錄，未使用的卡片會保留。學生畢業時，請到試算表直接刪除「卡片背包」工作表的資料列。</p>
+      <p class="muted">刪除所有「已使用」「已回收」與「已轉出」的卡片紀錄，未使用的卡片會保留（清除後就不能再復原這些紀錄）。學生畢業時，請到試算表直接刪除「卡片背包」工作表的資料列。</p>
       <label class="field">要清除，請輸入「清除」兩個字
         <input id="bagClearInput" class="input" type="text" autocomplete="off" placeholder="清除">
       </label>
@@ -164,11 +192,11 @@
     </section>
   </div>
 
-  <script src="config.js?v=9"></script>
-  <script src="js/api.js?v=9"></script>
-  <script src="js/pwa.js?v=9"></script>
-  <script src="js/settings.js?v=9"></script>
+  <script src="config.js?v=10"></script>
+  <script src="js/api.js?v=10"></script>
+  <script src="js/pwa.js?v=10"></script>
+  <script src="js/settings.js?v=10"></script>
   <!-- 著作權浮水印 -->
-  <script src="js/watermark.js?v=9" defer></script>
+  <script src="js/watermark.js?v=10" defer></script>
 </body>
 </html>
