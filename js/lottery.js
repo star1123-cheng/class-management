@@ -420,6 +420,12 @@
         data.bagCounts[d.seat] = Math.max(0, (data.bagCounts[d.seat] || 0) - d.cards.length);
         renderSeats(); renderSelection(); renderDrawButton();
       },
+      onTransferred: function (d) {
+        // 贈送／交換：未使用卡片數改成後端回傳的全班數字
+        if (!data || !d.counts) return;
+        data.bagCounts = d.counts;
+        renderSeats(); renderSelection(); renderDrawButton();
+      },
       onChanged: refresh,
       sfx: function (name) { if (typeof Sfx[name] === 'function') Sfx[name](); }
     });

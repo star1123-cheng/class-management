@@ -76,6 +76,7 @@
       renderTickets();
       renderPool();
       renderBag();
+      renderGrant();
       renderDraws();
     } catch (e) {
       if (e.code === 'UNAUTHORIZED' || e.code === 'FORBIDDEN') {
@@ -359,10 +360,110 @@
     }
   });
 
+  /* ============ 派發卡片 ============ */
+  var CUSTOM = '__custom';
+  var grantPicked = {};   // 勾選的座號
+
+  function renderGrant() {
+    if (!state.bag || !state.lottery) return;
+    var sel = $('grantCardSel');
+    var prev = sel.value;
+    App.clear(sel);
+    sel.appendChild(h('option', { value: '', text: '選一張卡…' }));
+    (state.bag.catalog || []).forEach(function (c) {
+      sel.appendChild(h('option', { value: c.name, text: c.name + (c.enabled ? '' : '（暫停抽出）') }));
+    });
+    sel.appendChild(h('option', { value: CUSTOM, text: '✏️ 自訂卡片…' }));
+    if (prev && Array.prototype.some.call(sel.options, function (o) { return o.value === prev; })) sel.value = prev;
+
+    // 名單變動時，拿掉已經不在籍的座號
+    var seats = state.lottery.seats;
+    Object.keys(grantPicked).forEach(function (s) { if (seats.indexOf(Number(s)) === -1) delete grantPicked[s]; });
+    var grid = $('grantSeats');
+    App.clear(grid);
+    if (!seats.length) grid.appendChild(h('p', { class: 'muted', style: 'grid-column:1/-1', text: '尚未匯入名單。' }));
+    seats.forEach(function (s) {
+      grid.appendChild(h('button', {
+        type: 'button', class: 'mini', 'aria-pressed': grantPicked[s] ? 'true' : 'false', text: s + ' 號',
+        onclick: function () {
+          if (grantPicked[s]) delete grantPicked[s]; else grantPicked[s] = true;
+          this.setAttribute('aria-pressed', grantPicked[s] ? 'true' : 'false');
+          updateGrantForm();
+        }
+      }));
+    });
+    updateGrantForm();
+  }
+
+  /** 目前要派的卡：{ name, description }；description 為 undefined 時由後端用卡片表的說明 */
+  function grantChoice() {
+    var v = $('grantCardSel').value;
+    if (!v) return null;
+    if (v === CUSTOM) {
+      var name = $('grantName').value.trim();
+      return name ? { name: name, description: $('grantDesc').value.trim() } : null;
+    }
+    var c = (state.bag.catalog || []).filter(function (x) { return x.name === v; })[0];
+    return c ? { name: c.name, description: undefined, shown: c.description } : null;
+  }
+
+  function grantSeats() {
+    return Object.keys(grantPicked).map(Number).sort(function (a, b) { return a - b; });
+  }
+
+  function updateGrantForm() {
+    var custom = $('grantCardSel').value === CUSTOM;
+    $('grantCustom').hidden = !custom;
+    var choice = grantChoice();
+    $('grantDescPreview').textContent = !custom && choice ? '說明：' + (choice.shown || '（沒有說明）') : '';
+    $('grantCount').textContent = String(grantSeats().length);
+    $('btnGrantCard').disabled = state.busy || !choice || grantSeats().length === 0;
+  }
+
+  $('grantCardSel').addEventListener('change', updateGrantForm);
+  $('grantName').addEventListener('input', updateGrantForm);
+  $('btnGrantAll').addEventListener('click', function () {
+    (state.lottery ? state.lottery.seats : []).forEach(function (s) { grantPicked[s] = true; });
+    renderGrant();
+  });
+  $('btnGrantNone').addEventListener('click', function () { grantPicked = {}; renderGrant(); });
+
+  $('btnGrantCard').addEventListener('click', async function () {
+    var choice = grantChoice();
+    var seats = grantSeats();
+    if (!choice || !seats.length || state.busy) return;
+    var list = seats.length > 10 ? seats.slice(0, 10).join('、') + '…等 ' + seats.length + ' 人' : seats.join('、') + ' 號';
+    if (!confirm('要把「' + choice.name + '」派給 ' + list + '，每人 1 張嗎？')) return;
+    state.busy = true;
+    updateGrantForm();
+    setStatus($('grantStatus'), '派發中…');
+    try {
+      var d = await App.api('grantCard', { seats: seats, name: choice.name, description: choice.description });
+      setStatus($('grantStatus'), '已把「' + choice.name + '」放進 ' + d.cards.length + ' 位同學的背包。', true);
+      grantPicked = {};
+      if ($('grantCardSel').value === CUSTOM) { $('grantName').value = ''; $('grantDesc').value = ''; }
+      state.busy = false;
+      loadAll();
+    } catch (e) {
+      state.busy = false;
+      setStatus($('grantStatus'), '派發失敗：' + App.errorText(e), false);
+      updateGrantForm();
+    }
+  });
+
   /* ============ 卡片背包 ============ */
   var CARD_LUCKY = '幸運女神';
   var RECYCLED = '已回收';
+  var TRANSFERRED = '已轉出';
   var PRIZE = '實物';   // 和後端 BAG_SOURCE_PRIZE 一致
+
+  /** 取得方式的附註：幸運女神、實物、老師派發、同學贈送／交換 */
+  function sourceNote(c) {
+    if (c.source === CARD_LUCKY) return '（幸運女神）';
+    if (c.source === PRIZE) return '（實物）';
+    if (c.source === '老師派發' || /^\d+號(贈送|交換)$/.test(c.source)) return '（' + c.source + '）';
+    return '';
+  }
 
   function loadBagData() {
     var seat = $('bagSeat').value;
@@ -395,7 +496,7 @@
 
     var unused = bag.cards.filter(function (c) { return c.status === '未使用'; })
       .sort(function (a, b) { return a.seat - b.seat || (a.gotAt < b.gotAt ? -1 : 1); });
-    var used = bag.cards.filter(function (c) { return c.status === '已使用' || c.status === RECYCLED; });
+    var used = bag.cards.filter(function (c) { return c.status === '已使用' || c.status === RECYCLED || c.status === TRANSFERRED; });
     $('bagUnusedCount').textContent = unused.length;
 
     var ub = $('bagUnusedBody');
@@ -407,7 +508,7 @@
       ub.appendChild(h('tr', {},
         h('td', { text: c.seat + ' 號' }),
         h('td', { title: c.description, text: c.name }),
-        h('td', { text: App.fmtMD(c.gotAt) + (c.source === CARD_LUCKY ? '（幸運女神）' : c.source === PRIZE ? '（實物）' : '') }),
+        h('td', { text: App.fmtMD(c.gotAt) + sourceNote(c) }),
         cell));
     });
 
@@ -416,12 +517,13 @@
     if (!used.length) bb.appendChild(h('tr', {}, h('td', { colspan: '4', class: 'muted', text: '還沒有使用過的卡片。' })));
     used.forEach(function (c) {
       var recycled = c.status === RECYCLED;
+      var moved = c.status === TRANSFERRED;
       bb.appendChild(h('tr', {},
         h('td', { text: App.fmtMD(c.usedAt) + ' ' + App.fmtHM(c.usedAt) }),
         h('td', { text: c.seat + ' 號' }),
-        h('td', { text: c.name + (recycled ? '（已回收）' : c.source === PRIZE ? '（已領取）' : '') }),
+        h('td', { text: c.name + (recycled ? '（已回收）' : moved ? '（已轉出）' : c.source === PRIZE ? '（已領取）' : '') }),
         h('td', {}, h('button', { type: 'button', class: 'btn btn-small', text: '復原',
-          onclick: function () { recycled ? undoRecycle(c, this) : undoUse(c, this); } }))));
+          onclick: function () { recycled ? undoRecycle(c, this) : moved ? undoTransfer(c, this) : undoUse(c, this); } }))));
     });
   }
 
@@ -494,12 +596,28 @@
     }
   }
 
+  /** 復原贈送／交換：兩邊收到的卡收回，原本的卡改回未使用 */
+  async function undoTransfer(card, btn) {
+    if (!confirm('要復原這次的贈送／交換嗎？\n' + card.seat + ' 號的「' + card.name + '」（以及同一次轉出的卡）會改回未使用，對方收到的卡會收回。')) return;
+    btn.disabled = true;
+    try {
+      var d = await App.api('undoTransfer', { transferId: card.transferId });
+      setStatus($('bagStatus'), '已復原：' + d.restored + ' 張卡改回原主人，收回 ' + d.revoked + ' 張轉送出去的卡。', true);
+      loadAll();
+    } catch (e) {
+      var text = e.code === 'CANNOT_UNDO' ? '對方收到的卡已經使用、回收或再轉出了。' : App.errorText(e);
+      setStatus($('bagStatus'), '復原失敗：' + text, false);
+      btn.disabled = false;
+      if (e.code === 'NOT_FOUND') reloadBag();
+    }
+  }
+
   $('bagClearInput').addEventListener('input', function () {
     $('btnBagClear').disabled = this.value.trim() !== '清除';
   });
   $('btnBagClear').addEventListener('click', async function () {
     if ($('bagClearInput').value.trim() !== '清除') return;
-    if (!confirm('確定要刪除所有「已使用」與「已回收」的卡片紀錄嗎？這個動作無法復原。')) return;
+    if (!confirm('確定要刪除所有「已使用」「已回收」與「已轉出」的卡片紀錄嗎？這個動作無法復原。')) return;
     this.disabled = true;
     try {
       var d = await App.api('clearUsedCards', { confirm: '清除' });

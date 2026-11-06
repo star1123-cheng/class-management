@@ -548,6 +548,11 @@ button.tcard:hover .tc-shine { animation: shine .9s ease-in-out both; }
 .btn-recycle { border-color: #6FDC8C; color: #6FDC8C; }
 .btn-recycle:disabled { border-color: var(--panel-border); color: var(--drawn-text); cursor: not-allowed; }
 .bag-actions .bag-hint { align-self: center; font-size: calc(1 * var(--u)); }
+.btn-trade { border-color: #7CC8FF; color: #7CC8FF; }
+.btn-trade:disabled { border-color: var(--panel-border); color: var(--drawn-text); cursor: not-allowed; }
+/* 送給同學／交換：步驟標題與對象座號 */
+.trade-step { margin-top: calc(1.2 * var(--u)); }
+.trade-seats { padding-bottom: calc(.4 * var(--u)); }
 
 @media (prefers-reduced-motion: reduce) {
   .tcard.stamping .stamp, .pop-in, .bag-note { animation: none !important; opacity: 1; }

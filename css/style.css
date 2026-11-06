@@ -226,6 +226,7 @@ table.data tr.row-error td.err { font-weight: 700; white-space: normal; }
 .mini.off { background: #F3ECE2; color: #B59C85; border-style: dashed; }
 .mini.static { cursor: default; }
 .mini.has { border-color: #F0B07A; background: #FFF4EA; }
+.mini[aria-pressed="true"] { border: 2px solid var(--done); background: #E3F4E6; color: var(--done); }
 
 .stepper { display: inline-flex; align-items: center; gap: 6px; }
 .stepper output { min-width: 44px; text-align: center; font-size: 22px; font-weight: 800; }

@@ -5,6 +5,7 @@
  * 幸運女神：使用前先從其他卡片挑一張，挑到的卡放進同一位同學的背包。
  * 回收換券：勾選 3 張未使用的卡（卡名可以相同）→ 換 1 張抽籤券（需要導師碼）。
  * 實物（小文具小玩具）也會放進背包，「使用」就是領取；實物不能回收換券。
+ * 送給同學／交換：選要送出的卡 → 選對象 →（可選）選要換回的卡 → 確認（需要導師碼）。實物不能送或換。
  * 「復原」只在設定頁提供（導師專用）。
  */
 (function () {
@@ -15,13 +16,18 @@
   var CARD_REDRAW = '再抽一次';
   var CARD_LUCKY = '幸運女神';
   var RECYCLED = '已回收';
+  var TRANSFERRED = '已轉出';
   var RECYCLE_COUNT = 3;  // 和後端 RECYCLE_COUNT 一致
+  var TRANSFER_MAX = 5;   // 和後端 TRANSFER_MAX 一致
   var PRIZE = '實物';     // 和後端 BAG_SOURCE_PRIZE 一致
+  var TEACHER = '老師派發'; // 和後端 BAG_SOURCE_TEACHER 一致
 
   function isPrize(card) { return card.source === PRIZE; }
   function canRecycleCard(card) { return card.status === '未使用' && !isPrize(card); }
+  function canTransferCard(card) { return card.status === '未使用' && !isPrize(card); }
+  function isFromClassmate(card) { return /^\d+號(贈送|交換)$/.test(card.source || ''); }
 
-  var hooks = null;   // 由 lottery.js 提供：getSeats、getSelected、getBagCounts、isIdle、onUsed、onRecycled、onChanged、sfx
+  var hooks = null;   // 由 lottery.js 提供：getSeats、getSelected、getBagCounts、isIdle、onUsed、onRecycled、onTransferred、onChanged、sfx
   var st = { seat: null, cards: [], choices: [], counts: {}, busy: false, loadSeq: 0 };
 
   function init(opts) {
@@ -104,13 +110,15 @@
   function ticket(card, opts) {
     opts = opts || {};
     var recycled = card.status === RECYCLED;
-    var used = card.status === '已使用' || recycled;
+    var moved = card.status === TRANSFERRED;
+    var used = card.status === '已使用' || recycled || moved;
     var prize = isPrize(card);
-    var mark = recycled ? '已回收' : prize ? '已領取' : '已使用';
+    var mark = recycled ? '已回收' : moved ? '已送出' : prize ? '已領取' : '已使用';
     var meta = opts.meta !== undefined ? opts.meta
-      : used ? App.fmtMD(card.usedAt) + (recycled ? ' 回收' : prize ? ' 領取' : ' 使用')
+      : used ? App.fmtMD(card.usedAt) + (recycled ? ' 回收' : moved ? ' 送出' : prize ? ' 領取' : ' 使用')
       : card.gotAt ? App.fmtMD(card.gotAt) + ' 取得' : '';
-    var from = used ? '' : card.source === CARD_LUCKY ? '🍀 幸運女神' : prize ? '🎁 實物' : '';
+    var from = used ? '' : card.source === CARD_LUCKY ? '🍀 幸運女神' : prize ? '🎁 實物'
+      : card.source === TEACHER ? '🎓 老師派發' : isFromClassmate(card) ? '🤝 ' + card.source : '';
     return LotteryFx.cardEl(card, {
       tag: opts.onclick ? 'button' : 'div',
       topLeft: meta,
@@ -131,17 +139,22 @@
     var unused = st.cards.filter(function (c) { return c.status === '未使用'; });
     var used = st.cards.filter(function (c) { return c.status === '已使用'; });
     var recycled = st.cards.filter(function (c) { return c.status === RECYCLED; });
+    var moved = st.cards.filter(function (c) { return c.status === TRANSFERRED; });
     body.appendChild(h('p', { class: 'bag-summary' },
       h('strong', { text: st.seat + ' 號' }), '　未使用 ', h('b', { text: String(unused.length) }), ' 張　・　已使用 ' + used.length + ' 張'
-        + (recycled.length ? '　・　已回收 ' + recycled.length + ' 張' : '')));
+        + (recycled.length ? '　・　已回收 ' + recycled.length + ' 張' : '')
+        + (moved.length ? '　・　已送出 ' + moved.length + ' 張' : '')));
     if (!st.cards.length) {
       body.appendChild(h('p', { class: 'bag-empty', text: '背包還是空的，抽到卡片後會自動放進來。' }));
       return;
     }
     var canRecycle = unused.filter(canRecycleCard).length >= RECYCLE_COUNT;
+    var canTransfer = unused.some(canTransferCard) && hooks.getSeats().length > 1;
     body.appendChild(h('div', { class: 'bag-actions' },
       h('button', { type: 'button', class: 'btn btn-recycle', disabled: !canRecycle, onclick: renderRecycle,
         text: '♻️ 回收 ' + RECYCLE_COUNT + ' 張換 1 張抽籤券' }),
+      h('button', { type: 'button', class: 'btn btn-trade', disabled: !canTransfer, onclick: renderTransfer,
+        text: '🤝 送給同學／交換' }),
       canRecycle ? null : h('span', { class: 'bag-hint', text: '（未使用的卡滿 ' + RECYCLE_COUNT + ' 張才能回收，實物不算）' })));
     // 已使用與已回收混在一起，依時間新到舊（後端已排好）
     var done = st.cards.filter(function (c) { return c.status !== '未使用'; });
@@ -158,6 +171,7 @@
     var used = card.status !== '未使用';
     var prize = isPrize(card);
     var hint = card.status === RECYCLED ? '這張卡在 ' + App.fmtMD(card.usedAt) + ' ' + App.fmtHM(card.usedAt) + ' 回收換券了。'
+      : card.status === TRANSFERRED ? '這張卡在 ' + App.fmtMD(card.usedAt) + ' ' + App.fmtHM(card.usedAt) + ' 送給同學或交換出去了。'
       : used && prize ? '這個獎品在 ' + App.fmtMD(card.usedAt) + ' ' + App.fmtHM(card.usedAt) + ' 領取了。'
       : prize ? '老師把獎品交給 ' + card.seat + ' 號後，按「領取」記錄下來。實物不能回收換券。'
       : used ? '這張卡在 ' + App.fmtMD(card.usedAt) + ' ' + App.fmtHM(card.usedAt) + ' 使用過了。'
@@ -317,6 +331,162 @@
       h('p', { class: 'bag-result' }, '♻️ 已回收 ' + d.cards.length + ' 張，送 ', h('strong', { text: d.seat + ' 號' }),
         ' 1 張抽籤券，目前 ', h('strong', { text: String(d.balance) }), ' 張'),
       grid,
+      h('div', { class: 'bag-actions' }, h('button', { type: 'button', class: 'btn btn-use', text: '回到背包', onclick: function () { load(); } }))));
+    if (hooks.sfx) hooks.sfx('fanfare');
+  }
+
+  /* ============ 送給同學／交換 ============ */
+  /**
+   * 一個畫面分三步：
+   * 1. 選這位同學要送出的卡（最多 TRANSFER_MAX 張）
+   * 2. 選要送給幾號
+   * 3.（可選）選要跟對方換回的卡；不選就是直接贈送
+   */
+  function renderTransfer() {
+    var body = $('bagBody');
+    App.clear(body);
+    var me = st.seat;
+    var give = [];
+    var receive = [];
+    var toSeat = null;
+    var targetSeq = 0;
+
+    var giveCount = h('b', { text: '0' });
+    var confirmBtn = h('button', { type: 'button', class: 'btn btn-use', disabled: true,
+      onclick: function () { transfer(me, give, toSeat, receive, this); } });
+    function updateConfirm() {
+      giveCount.textContent = String(give.length);
+      confirmBtn.disabled = !give.length || toSeat === null || st.busy;
+      confirmBtn.textContent = toSeat === null ? '請選要送給誰'
+        : receive.length ? '確定和 ' + toSeat + ' 號交換' : '確定送給 ' + toSeat + ' 號';
+    }
+
+    /** 可以點選的卡片格（toggle），picked 是要記錄的陣列 */
+    function pickGrid(cards, picked) {
+      var grid = h('div', { class: 'bag-grid lucky' });
+      cards.forEach(function (c) {
+        var el = ticket(c, {
+          onclick: function () {
+            var i = picked.indexOf(c);
+            if (i !== -1) picked.splice(i, 1);
+            else if (picked.length < TRANSFER_MAX) picked.push(c);
+            else { App.toast('一次最多選 ' + TRANSFER_MAX + ' 張。', 'error'); return; }
+            el.classList.toggle('picked', i === -1);
+            el.setAttribute('aria-pressed', i === -1 ? 'true' : 'false');
+            updateConfirm();
+          }
+        });
+        el.setAttribute('aria-pressed', 'false');
+        grid.appendChild(el);
+      });
+      return grid;
+    }
+
+    // 1. 要送出的卡
+    body.appendChild(h('p', { class: 'bag-summary' }, '🤝 ① 請 ', h('strong', { text: me + ' 號' }),
+      ' 選要送出的卡（實物不行）　已選 ', giveCount, ' / ' + TRANSFER_MAX));
+    body.appendChild(pickGrid(st.cards.filter(canTransferCard), give));
+
+    // 2. 送給誰
+    var seatBox = h('div', { class: 'bag-seats trade-seats', role: 'group', 'aria-label': '要送給幾號' });
+    hooks.getSeats().forEach(function (s) {
+      if (s === me) return;
+      seatBox.appendChild(h('button', {
+        type: 'button', class: 'bag-seat', 'aria-pressed': 'false', text: String(s),
+        onclick: function () {
+          toSeat = s;
+          receive.length = 0;
+          Array.prototype.forEach.call(seatBox.children, function (b) {
+            var on = b === this;
+            b.classList.toggle('selected', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+          }, this);
+          loadTarget(s);
+          updateConfirm();
+        }
+      }));
+    });
+    body.appendChild(h('p', { class: 'bag-summary trade-step', text: '② 要送給幾號？' }));
+    body.appendChild(seatBox);
+
+    // 3. 換回的卡（讀取對方的背包）
+    var targetBox = h('div', {});
+    body.appendChild(targetBox);
+    async function loadTarget(s) {
+      var seq = ++targetSeq;
+      App.clear(targetBox);
+      targetBox.appendChild(h('p', { class: 'bag-hint', text: '讀取 ' + s + ' 號的背包…' }));
+      try {
+        var d = await App.api('getBackpack', { seat: s });
+        if (seq !== targetSeq) return;
+        var cards = d.cards.filter(canTransferCard);
+        App.clear(targetBox);
+        targetBox.appendChild(h('p', { class: 'bag-summary trade-step' }, '③（可以不選）要跟 ', h('strong', { text: s + ' 號' }),
+          ' 換回哪些卡？不選就是直接送給 ' + s + ' 號'));
+        if (!cards.length) targetBox.appendChild(h('p', { class: 'bag-hint', text: s + ' 號沒有可以交換的卡，只能直接贈送。' }));
+        else targetBox.appendChild(pickGrid(cards, receive));
+      } catch (e) {
+        if (seq !== targetSeq) return;
+        App.clear(targetBox);
+        targetBox.appendChild(h('p', { class: 'bag-hint', text: '讀取 ' + s + ' 號的背包失敗：' + App.errorText(e) + '（仍可直接贈送）' }));
+      }
+    }
+
+    body.appendChild(h('div', { class: 'bag-actions sticky' },
+      h('button', { type: 'button', class: 'btn', text: '← 返回', onclick: renderList }),
+      confirmBtn));
+    updateConfirm();
+  }
+
+  async function transfer(me, give, toSeat, receive, btn) {
+    if (st.busy || !give.length || toSeat === null) return;
+    var names = function (list) { return list.map(function (c) { return '「' + c.name + '」'; }).join('、'); };
+    var msg = receive.length
+      ? me + ' 號用 ' + names(give) + '\n和 ' + toSeat + ' 號交換 ' + names(receive) + '，確定嗎？'
+      : '要把 ' + me + ' 號的 ' + names(give) + '\n送給 ' + toSeat + ' 號嗎？';
+    if (!confirm(msg)) return;
+    st.busy = true;
+    var label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '處理中…';
+    try {
+      var d = await App.teacherApi('transferCards', {
+        giveIds: give.map(function (c) { return c.id; }),
+        toSeat: toSeat,
+        receiveIds: receive.map(function (c) { return c.id; })
+      });
+      st.busy = false;
+      st.counts = d.counts || st.counts;
+      renderSeats();
+      renderTransferred(d);
+      if (hooks.onTransferred) hooks.onTransferred(d);
+    } catch (e) {
+      st.busy = false;
+      btn.textContent = label;
+      if (e.code === 'CANCELLED') { btn.disabled = false; return; }
+      App.toast(App.errorText(e), 'error');
+      if (e.code === 'ALREADY_USED' || e.code === 'NOT_FOUND') { load(); return; }
+      btn.disabled = false;
+    }
+  }
+
+  /** 贈送／交換成功：顯示雙方各收到哪些卡 */
+  function renderTransferred(d) {
+    var body = $('bagBody');
+    App.clear(body);
+    var trade = d.received.length > 0;
+    function row(cards) {
+      var grid = h('div', { class: 'bag-grid recycled' });
+      cards.forEach(function (c) { grid.appendChild(ticket(c, { cls: 'pop-in' })); });
+      return grid;
+    }
+    body.appendChild(h('div', { class: 'bag-detail' },
+      h('p', { class: 'bag-result' }, '🤝 ', h('strong', { text: d.fromSeat + ' 號' }), trade ? ' 和 ' : ' 送給 ',
+        h('strong', { text: d.toSeat + ' 號' }), trade ? ' 交換成功！' : ' ' + d.given.length + ' 張卡！'),
+      h('p', { class: 'bag-hint', text: d.toSeat + ' 號收到：' }),
+      row(d.given),
+      trade ? h('p', { class: 'bag-hint', text: d.fromSeat + ' 號收到：' }) : null,
+      trade ? row(d.received) : null,
       h('div', { class: 'bag-actions' }, h('button', { type: 'button', class: 'btn btn-use', text: '回到背包', onclick: function () { load(); } }))));
     if (hooks.sfx) hooks.sfx('fanfare');
   }
